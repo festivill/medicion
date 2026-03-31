@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.meg
+autosave.json
+split_source.py
+*.tar.gz
+*.bak
+.DS_Store
