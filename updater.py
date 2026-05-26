@@ -24,7 +24,7 @@ import urllib.request
 import urllib.error
 
 GITHUB_USER = "festivill"
-GITHUB_REPO = "medicion45"
+GITHUB_REPO = "medicion"
 GITHUB_BRANCH = "main"
 
 VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/{GITHUB_BRANCH}/VERSION"
