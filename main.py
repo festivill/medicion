@@ -12,4 +12,9 @@ from app import PlanillaFinalApp
 if __name__ == "__main__":
     root = tk.Tk()
     app = PlanillaFinalApp(root)
+    try:
+        from updater import check_for_updates_async
+        check_for_updates_async(root)
+    except Exception:
+        pass
     root.mainloop()
