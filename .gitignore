@@ -8,3 +8,8 @@ split_source.py
 *.tar.gz
 *.bak
 .DS_Store
+
+# Instalador Windows: Python embebido y artefactos descargados
+python/
+get-pip.py
+*.zip
