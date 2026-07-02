@@ -2644,6 +2644,15 @@ class PdfReportsMixin:
 
         c.restoreState()
 
+    def _celda_sin_marcador(self, var_key):
+        """Valor de una variable para las tablas del PDF, ocultando los marcadores
+        heredados tipo '[trim 2col]' o '[5pts]' que versiones previas dejaban en los
+        campos de interpolación de 2 puntos (prod_s1, agua_s1, ...). El cálculo del
+        volumen ya los ignora (ver calculos._pfm); acá evitamos que se filtren como
+        texto a las columnas SOND/LTS de la planilla. Devuelve '' si es un marcador."""
+        v = self.get_var(var_key).get()
+        return "" if v.strip().startswith("[") else v
+
     def generar_reporte_tecnico_global(self, suffix, output_folder, shared_canvas=None):
         clean_name = self.clean_filename(self.get_var('car_buque').get())
         filename = f"Reporte_Tecnico_Global_{clean_name}_{datetime.now().strftime('%Y%m%d')}.pdf"
@@ -2812,7 +2821,7 @@ class PdfReportsMixin:
                     self.get_var(f"inicial_{tk_name}_temp").get(),
                     self.get_var(f"inicial_{tk_name}_vol_nat_prod").get()]
             else:
-                vals = [tk_name, self.get_var(f"inicial_{tk_name}_prod_name").get(), self.get_var(f"inicial_{tk_name}_num_uti").get(), self.get_var(f"inicial_{tk_name}_alt_ref").get(), self.get_var(f"inicial_{tk_name}_prod_s1").get(), self.get_var(f"inicial_{tk_name}_prod_l1").get(), self.get_var(f"inicial_{tk_name}_prod_s2").get(), self.get_var(f"inicial_{tk_name}_prod_l2").get(), self.get_var(f"inicial_{tk_name}_desc_tubo").get(), self.get_var(f"inicial_{tk_name}_s_corr").get(), self.get_var(f"inicial_{tk_name}_temp").get(), self.get_var(f"inicial_{tk_name}_vol_nat_prod").get()]
+                vals = [tk_name, self.get_var(f"inicial_{tk_name}_prod_name").get(), self.get_var(f"inicial_{tk_name}_num_uti").get(), self.get_var(f"inicial_{tk_name}_alt_ref").get(), self._celda_sin_marcador(f"inicial_{tk_name}_prod_s1"), self._celda_sin_marcador(f"inicial_{tk_name}_prod_l1"), self._celda_sin_marcador(f"inicial_{tk_name}_prod_s2"), self._celda_sin_marcador(f"inicial_{tk_name}_prod_l2"), self.get_var(f"inicial_{tk_name}_desc_tubo").get(), self.get_var(f"inicial_{tk_name}_s_corr").get(), self.get_var(f"inicial_{tk_name}_temp").get(), self.get_var(f"inicial_{tk_name}_vol_nat_prod").get()]
             for i, v in enumerate(vals):
                 if i < len(x_pos): c.drawString(x_pos[i], y, str(v))
             y -= 12
@@ -2890,7 +2899,7 @@ class PdfReportsMixin:
                     self.get_var(f"final_{tk_name}_temp").get(),
                     self.get_var(f"final_{tk_name}_vol_nat_prod").get()]
             else:
-                vals = [tk_name, self.get_var(f"final_{tk_name}_prod_name").get(), self.get_var(f"final_{tk_name}_num_uti").get(), self.get_var(f"final_{tk_name}_alt_ref").get(), self.get_var(f"final_{tk_name}_prod_s1").get(), self.get_var(f"final_{tk_name}_prod_l1").get(), self.get_var(f"final_{tk_name}_prod_s2").get(), self.get_var(f"final_{tk_name}_prod_l2").get(), self.get_var(f"final_{tk_name}_desc_tubo").get(), self.get_var(f"final_{tk_name}_s_corr").get(), self.get_var(f"final_{tk_name}_temp").get(), self.get_var(f"final_{tk_name}_vol_nat_prod").get()]
+                vals = [tk_name, self.get_var(f"final_{tk_name}_prod_name").get(), self.get_var(f"final_{tk_name}_num_uti").get(), self.get_var(f"final_{tk_name}_alt_ref").get(), self._celda_sin_marcador(f"final_{tk_name}_prod_s1"), self._celda_sin_marcador(f"final_{tk_name}_prod_l1"), self._celda_sin_marcador(f"final_{tk_name}_prod_s2"), self._celda_sin_marcador(f"final_{tk_name}_prod_l2"), self.get_var(f"final_{tk_name}_desc_tubo").get(), self.get_var(f"final_{tk_name}_s_corr").get(), self.get_var(f"final_{tk_name}_temp").get(), self.get_var(f"final_{tk_name}_vol_nat_prod").get()]
             for i, v in enumerate(vals):
                 if i < len(x_pos): c.drawString(x_pos[i], y, str(v))
             y -= 12
