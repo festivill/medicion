@@ -2249,9 +2249,11 @@ class PlanillaFinalApp:
                     rows = (db_buscar_funcionarios(q, "apellido") +
                             db_buscar_funcionarios(q, "cuil") +
                             db_buscar_funcionarios(q, "funcion"))
+                    # Dedup por registro completo: un agente con varias
+                    # funciones aparece una vez POR FUNCIÓN
                     seen = set(); unique = []
                     for r in rows:
-                        k = r.get("cuil","") or r.get("apellido","")
+                        k = (r.get("cuil",""), r.get("legajo",""), r.get("funcion",""))
                         if k not in seen:
                             seen.add(k); unique.append(r)
                     rows = unique
@@ -2382,7 +2384,7 @@ class PlanillaFinalApp:
                     rows = db_buscar_funcionarios(query, "apellido") + db_buscar_funcionarios(query, "cuil") + db_buscar_funcionarios(query, "funcion")
                     seen = set(); unique = []
                     for r in rows:
-                        k = (r["cuil"], r["legajo"])
+                        k = (r["cuil"], r["legajo"], r["funcion"])
                         if k not in seen: seen.add(k); unique.append(r)
                 else:
                     unique = db_todos_funcionarios()
@@ -2491,8 +2493,10 @@ class PlanillaFinalApp:
                     if existing_vals:
                         old_cuil = existing_vals.get("cuil", "")
                         old_legajo = existing_vals.get("legajo", "")
-                        if old_cuil != cuil_clean or old_legajo != legajo_new:
-                            db_eliminar_funcionario(old_cuil, old_legajo)
+                        old_funcion = existing_vals.get("funcion", "")
+                        if (old_cuil != cuil_clean or old_legajo != legajo_new
+                                or old_funcion != vs["funcion"].get().strip()):
+                            db_eliminar_funcionario(old_cuil, old_legajo, old_funcion)
                     db_guardar_funcionario(cuil_clean, legajo_new,
                                           apellido, vs["nombre"].get().strip(),
                                           vs["funcion"].get().strip(), adu_val, lop_val)
@@ -2546,7 +2550,7 @@ class PlanillaFinalApp:
                 if not messagebox.askyesno("Confirmar", f"Eliminar {len(sel)} registro(s) seleccionado(s) de la base de datos?", parent=top): return
                 for item in sel:
                     vals = tree.item(item, "values")
-                    db_eliminar_funcionario(vals[0], vals[1])
+                    db_eliminar_funcionario(vals[0], vals[1], vals[4] if len(vals) > 4 else None)
                 _load(v_search.get())
 
             def _importar_csv():
