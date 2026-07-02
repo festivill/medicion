@@ -2181,507 +2181,377 @@ class PdfReportsMixin:
         if "METANERO" in tm or "GNL" in tm:
             self._pdf_draw_metanero_ship(c, x, y, width, height, etapa_key, title)
             return
+        # ═══════════════════════════════════════════════════════════════════
+        #  BUQUE / BARCAZA — perfil lateral estilo plano naval
+        #  Casco esbelto y proporcionado, mar de fondo con flotación según
+        #  calados reales (el asiento inclina la flotación), tanques con
+        #  nivel de llenado, escalas de calado y vista de popa con escora.
+        # ═══════════════════════════════════════════════════════════════════
         c.saveState()
-        cx, cy = x + width/2, y + height/2
-        angle = 0
-        if trim_sign > 0: angle = 1.5
-        elif trim_sign < 0: angle = -1.5
-        c.translate(cx, cy)
-        c.rotate(angle)
-        c.translate(-cx, -cy)
+        etapa = etapa_key
+        es_barcaza = (tipo_nave == "BARCAZA")
+        AZUL    = colors.HexColor("#1B3A5C")
+        CASCO   = colors.HexColor("#22313F")
+        CASCO_B = colors.HexColor("#101A22")
+        ROJO    = colors.HexColor("#8E2F23")
+        MAR     = colors.HexColor("#AED6F1")
+        MAR2    = colors.HexColor("#85C1E9")
+        MAR_LIN = colors.HexColor("#1A5276")
+        GRIS    = colors.HexColor("#5D6D7E")
 
-        # --- DIMENSIONES BASE ---
-        hull_top_y = y + height - 25
-        hull_bot_y = y + 15
-        bow_x = x + width - 15
-        stern_x = x + 15
-        mid_y = (hull_top_y + hull_bot_y) / 2
-        hull_h = hull_top_y - hull_bot_y
+        # ── Datos de la medición ────────────────────────────────────────────
+        c_proa = self.parse_float(self.get_var(f"{etapa}_Calados Proa").get() or "0")
+        c_popa = self.parse_float(self.get_var(f"{etapa}_Calados Popa").get() or "0")
+        if c_proa <= 0 and c_popa <= 0:
+            c_proa = c_popa = 1.0
+        puntal_m = max(1.0, max(c_proa, c_popa) * 1.45)   # profundidad estimada del casco
 
-        # --- TITULO (inside drawing area, near top) ---
+        # ── Layout: perfil (izq) + vista popa (der) ────────────────────────
+        popa_w  = min(92, width * 0.15)
+        px0, px1 = x, x + width - popa_w - 16
+        keel_y  = y + 16
+        hull_h  = max(34, height * 0.33)                  # casco esbelto (~1:12)
+        deck_y  = keel_y + hull_h
+        px_m    = hull_h / puntal_m
+        stern_x = px0 + 46
+        bow_x   = px1 - 52
+        wl_st   = keel_y + min(c_popa, puntal_m * 0.92) * px_m
+        wl_bw   = keel_y + min(c_proa, puntal_m * 0.92) * px_m
+
+        # ── Título ─────────────────────────────────────────────────────────
         c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(colors.HexColor("#1B3A5C"))
-        c.drawCentredString(x + width/2, y + height - 10, title)
+        c.setFillColor(AZUL)
+        c.drawCentredString((px0 + px1) / 2, y + height - 8, title)
 
-        if tipo_nave == "BARCAZA":
-            # === BARCAZA ===
-            r = 6
-            # Casco
-            c.setFillColor(colors.HexColor("#2C3E50"))
-            c.setStrokeColor(colors.HexColor("#1B2631"))
-            c.setLineWidth(1.5)
-            c.roundRect(stern_x, hull_bot_y, bow_x - stern_x, hull_top_y - hull_bot_y, r, fill=1, stroke=1)
-            # Cubierta
-            c.setFillColor(colors.HexColor("#5D6D7E"))
-            c.roundRect(stern_x, hull_top_y - 6, bow_x - stern_x, 6, r, fill=1, stroke=0)
-            # Hatches en cubierta
-            hatch_count = max(2, int((bow_x - stern_x - 30) // 30))
-            hatch_step = (bow_x - stern_x - 30) / (hatch_count + 1)
-            for hi2 in range(hatch_count):
-                hx2 = stern_x + 15 + (hi2+1)*hatch_step - 10
-                c.setFillColor(colors.HexColor("#485564")); c.setStrokeColor(colors.HexColor("#2C3E50")); c.setLineWidth(0.5)
-                c.roundRect(hx2, hull_top_y - 5, 20, 4, 1, fill=1, stroke=1)
-            # Franja roja de flotacion
-            c.setFillColor(colors.HexColor("#922B21"))
-            c.rect(stern_x + 1, hull_bot_y + 1, bow_x - stern_x - 2, (mid_y - hull_bot_y) - 1, fill=1, stroke=0)
-            # Linea de flotacion
-            c.setStrokeColor(colors.HexColor("#2E86C1"))
-            c.setLineWidth(1.2)
-            c.setDash(4, 2)
-            c.line(stern_x - 8, mid_y, bow_x + 8, mid_y)
-            c.setDash()
+        # ── Mar de fondo (detrás del casco) ────────────────────────────────
+        sea_top_st = wl_st + (wl_st - wl_bw) * 0.05
+        sea_top_bw = wl_bw - (wl_st - wl_bw) * 0.05
+        c.setFillColor(MAR)
+        p_sea = c.beginPath()
+        p_sea.moveTo(px0, sea_top_st); p_sea.lineTo(px1, sea_top_bw)
+        p_sea.lineTo(px1, y + 8); p_sea.lineTo(px0, y + 8)
+        p_sea.close()
+        c.drawPath(p_sea, fill=1, stroke=0)
+        c.setFillColor(MAR2)
+        c.rect(px0, y + 8, px1 - px0, (min(sea_top_st, sea_top_bw) - y - 8) * 0.45, fill=1, stroke=0)
 
+        # ── Bulbo de proa (detrás del casco, integrado a la roda) ─────────
+        if not es_barcaza:
+            _btip = bow_x + 27
+            c.setFillColor(ROJO); c.setStrokeColor(colors.HexColor("#5B1A14")); c.setLineWidth(0.7)
+            c.ellipse(_btip - 16, keel_y - 1.5, _btip + 7, keel_y + 5.5, fill=1, stroke=1)
+
+        # ── Silueta del casco ──────────────────────────────────────────────
+        p_hull = c.beginPath()
+        if es_barcaza:
+            rk = 20
+            p_hull.moveTo(stern_x, deck_y)
+            p_hull.lineTo(bow_x, deck_y)
+            p_hull.lineTo(bow_x + rk, keel_y + hull_h * 0.42)
+            p_hull.lineTo(bow_x + rk, keel_y + 2)
+            p_hull.lineTo(bow_x - 8, keel_y)
+            p_hull.lineTo(stern_x + 8, keel_y)
+            p_hull.lineTo(stern_x - rk, keel_y + 2)
+            p_hull.lineTo(stern_x - rk, keel_y + hull_h * 0.42)
+            p_hull.close()
+            bow_tip, stern_tip = bow_x + rk, stern_x - rk
         else:
-            # === BUQUE ===
-            # --- Casco superior (azul marino oscuro - obra muerta) ---
-            p_top = c.beginPath()
-            p_top.moveTo(stern_x - 5, hull_top_y)
-            p_top.lineTo(bow_x + 5, hull_top_y)
-            p_top.curveTo(bow_x + 30, hull_top_y, bow_x + 35, mid_y + 10, bow_x + 15, mid_y)
-            p_top.lineTo(stern_x - 5, mid_y)
-            p_top.close()
-            c.setFillColor(colors.HexColor("#1B2631"))
-            c.setStrokeColor(colors.HexColor("#0E1A27"))
-            c.setLineWidth(1)
-            c.drawPath(p_top, fill=1, stroke=1)
-            
-            # Franja decorativa (linea blanca entre obra muerta y viva)
-            c.setStrokeColor(colors.HexColor("#F0F0F0"))
-            c.setLineWidth(1.2)
-            c.line(stern_x - 5, mid_y + 1, bow_x + 15, mid_y + 1)
+            sheer = 4
+            p_hull.moveTo(stern_x - 6, deck_y)                      # espejo de popa
+            p_hull.lineTo(bow_x, deck_y + sheer)                    # cubierta con arrufo
+            p_hull.curveTo(bow_x + 18, deck_y + sheer - 1,          # roda lanzada
+                           bow_x + 27, wl_bw + 6,
+                           bow_x + 25, wl_bw - 2)
+            p_hull.curveTo(bow_x + 22, keel_y + 3,                  # entrada a quilla
+                           bow_x + 12, keel_y,
+                           bow_x - 10, keel_y)
+            p_hull.lineTo(stern_x + 18, keel_y)                     # quilla
+            p_hull.curveTo(stern_x + 6, keel_y + 1,                 # bovedilla
+                           stern_x - 8, keel_y + hull_h * 0.22,
+                           stern_x - 11, keel_y + hull_h * 0.42)
+            p_hull.lineTo(stern_x - 13, deck_y)                     # espejo casi vertical
+            p_hull.close()
+            bow_tip, stern_tip = bow_x + 27, stern_x - 13
+        c.setFillColor(CASCO); c.setStrokeColor(CASCO_B); c.setLineWidth(1)
+        c.drawPath(p_hull, fill=1, stroke=1)
 
-            # Ojos de buey (portholes) en la obra muerta
-            port_y = mid_y + (hull_top_y - mid_y) * 0.45
-            port_spacing = max(14, (bow_x - stern_x - 80) / 8)
-            for pxi in range(7):
-                px2 = stern_x + 60 + pxi * port_spacing
-                if px2 < bow_x - 10:
-                    c.setFillColor(colors.HexColor("#AED6F1")); c.setStrokeColor(colors.HexColor("#85C1E9")); c.setLineWidth(0.6)
-                    c.circle(px2, port_y, 3.5, fill=1, stroke=1)
-                    c.setFillColor(colors.HexColor("#FDFEFE")); c.setLineWidth(0)
-                    c.circle(px2-1, port_y+1, 1, fill=1, stroke=0)
-
-            # --- Casco inferior (rojo burdeos - obra viva) ---
-            p_bot = c.beginPath()
-            p_bot.moveTo(stern_x - 5, mid_y)
-            p_bot.lineTo(bow_x + 15, mid_y)
-            p_bot.curveTo(bow_x + 10, hull_bot_y + 10, bow_x - 10, hull_bot_y, bow_x - 25, hull_bot_y)
-            p_bot.curveTo(cx, hull_bot_y - 6, stern_x + 20, hull_bot_y - 2, stern_x - 5, hull_bot_y + 5)
-            p_bot.close()
-            c.setFillColor(colors.HexColor("#7B241C"))
-            c.setStrokeColor(colors.HexColor("#5B1A14"))
-            c.drawPath(p_bot, fill=1, stroke=1)
-
-            # Bulbo de proa (sugerido como elipse oscura)
-            c.setFillColor(colors.HexColor("#2C3E50")); c.setStrokeColor(colors.HexColor("#1B2631")); c.setLineWidth(0.8)
-            c.ellipse(bow_x-15, hull_bot_y-3, bow_x+8, hull_bot_y+8, fill=1, stroke=1)
-
-            # Propulsión en la popa (hélice sugerida)
-            prop_x = stern_x - 5
-            prop_y = hull_bot_y + (mid_y - hull_bot_y) * 0.4
-            c.setFillColor(colors.HexColor("#4A5568")); c.setStrokeColor(colors.HexColor("#2C3E50")); c.setLineWidth(0.8)
-            c.circle(prop_x, prop_y, 5, fill=1, stroke=1)
-            c.setStrokeColor(colors.HexColor("#7F8C8D")); c.setLineWidth(1.2)
-            import math as _shm2
-            for ang_p in [0, 60, 120, 180, 240, 300]:
-                ar_p = _shm2.radians(ang_p)
-                c.line(prop_x, prop_y, prop_x+_shm2.cos(ar_p)*5, prop_y+_shm2.sin(ar_p)*5)
-
-            # Ancla en proa
-            anc_x = bow_x - 5; anc_y = hull_top_y
-            c.setFillColor(colors.HexColor("#7F8C8D")); c.setStrokeColor(colors.HexColor("#5D6D7E")); c.setLineWidth(1)
-            c.line(anc_x, anc_y, anc_x, anc_y-6)  # Chain
-            c.circle(anc_x, anc_y-6, 2, fill=1, stroke=1)  # Anchor ring
-
-            # --- Linea de flotacion ---
-            c.setStrokeColor(colors.HexColor("#2E86C1"))
-            c.setLineWidth(1.2)
-            c.setDash(4, 2)
-            c.line(stern_x - 12, mid_y, bow_x + 20, mid_y)
-            c.setDash()
-
-            # --- Marca de Plimsoll (Load Line) en cuaderna maestra ─────────
-            plim_cx = (stern_x + bow_x) / 2
-            plim_cy = mid_y
-            plim_r  = max(4, hull_h * 0.08)
-            c.setStrokeColor(colors.HexColor("#F0F0F0"))
-            c.setLineWidth(1.2)
-            c.circle(plim_cx, plim_cy, plim_r, fill=0, stroke=1)
-            c.line(plim_cx - plim_r - 5, plim_cy, plim_cx + plim_r + 5, plim_cy)
-            # LR en el centro
-            c.setFillColor(colors.HexColor("#F0F0F0"))
-            c.setFont("Helvetica-Bold", max(3, int(plim_r*0.55)))
-            c.drawCentredString(plim_cx, plim_cy - plim_r * 0.28, "LR")
-            # Líneas de carga (S, T, F)
-            c.setStrokeColor(colors.HexColor("#D0D0D0"))
-            c.setLineWidth(0.7)
-            c.setFont("Helvetica", max(3, int(plim_r*0.45)))
-            for _lll, _loff in [("S", -plim_r*1.5), ("T", -plim_r*2.7), ("F", -plim_r*3.9)]:
-                _ly = mid_y + _loff
-                c.line(plim_cx - plim_r - 4, _ly, plim_cx - plim_r, _ly)
-                c.setFillColor(colors.HexColor("#C0C0C0"))
-                c.drawRightString(plim_cx - plim_r - 5, _ly - 1.5, _lll)
-
-            # --- Marcas de Calado (Draft Marks) en PROA y POPA ──────────────
-            import math as _shmd
-            try:
-                _pdf_c_proa = self.parse_float(self.get_var(f"{etapa_key}_Calados Proa").get() or "0")
-                _pdf_c_popa = self.parse_float(self.get_var(f"{etapa_key}_Calados Popa").get() or "0")
-            except:
-                _pdf_c_proa = 0.0; _pdf_c_popa = 0.0
-
-            def _pdf_draft_scale(c2, dx, y_wl, y_keel, calado, side="right"):
-                _h = y_wl - y_keel  # en PDF, y aumenta hacia arriba
-                if _h < 8: return
-                _ppm = _h / max(calado, 4.0) if calado > 0 else _h / 6.0
-                _nmarks = int(calado) + 1 if calado > 0 else 5
-                c2.setStrokeColor(colors.HexColor("#C0C0C0"))
-                c2.setLineWidth(0.5)
-                c2.line(dx, y_keel - 2, dx, y_wl + 4)
-                c2.setFont("Helvetica", max(3, int(_h/12)))
-                for _mi in range(0, min(_nmarks + 2, 12)):
-                    _my = y_keel + _mi * _ppm
-                    if _my > y_wl + 5: break
-                    _lx1 = dx if side == "right" else dx - 4
-                    _lx2 = dx + 4 if side == "right" else dx
-                    c2.line(_lx1, _my, _lx2, _my)
-                    if _mi > 0:
-                        c2.setFillColor(colors.HexColor("#B0B0B0"))
-                        if side == "right":
-                            c2.drawString(_lx2 + 1, _my - 1.5, str(_mi))
-                        else:
-                            c2.drawRightString(_lx1 - 1, _my - 1.5, str(_mi))
-                # Calado medido (destacado)
-                if calado > 0:
-                    _wl_mark = y_keel + calado * _ppm
-                    if y_keel < _wl_mark < y_wl + 4:
-                        c2.setFillColor(colors.HexColor("#F4D03F"))
-                        c2.setStrokeColor(colors.HexColor("#F4D03F"))
-                        c2.setLineWidth(1.0)
-                        _ax = dx + 8 if side == "right" else dx - 8
-                        c2.line(dx, _wl_mark, _ax, _wl_mark)
-                        c2.setFont("Helvetica-Bold", max(3, int(_h/10)))
-                        if side == "right":
-                            c2.drawString(_ax + 1, _wl_mark - 1.5, f"{calado:.2f}m")
-                        else:
-                            c2.drawRightString(_ax - 1, _wl_mark - 1.5, f"{calado:.2f}m")
-                        c2.setLineWidth(0.5)
-
-            # Escala en PROA (derecha)
-            _bow_dx = bow_x - 8
-            _pdf_draft_scale(c, _bow_dx, mid_y, hull_bot_y,
-                             _pdf_c_proa if _pdf_c_proa > 0 else 4.0, "left")
-            c.setFillColor(colors.HexColor("#A0A0A0"))
-            c.setFont("Helvetica", max(3, int(hull_h/14)))
-            c.drawCentredString(_bow_dx, hull_top_y + 3, "PROA")
-
-            # Escala en POPA (izquierda)
-            _stern_dx = stern_x + 8
-            _pdf_draft_scale(c, _stern_dx, mid_y, hull_bot_y,
-                             _pdf_c_popa if _pdf_c_popa > 0 else 4.0, "right")
-            c.drawCentredString(_stern_dx, hull_top_y + 3, "POPA")
-
-            # Nombre del buque en el casco (si disponible)
-            _buq_nm = self.get_var("car_buque").get()[:22]
-            if _buq_nm and tipo_nave != "BARCAZA":
-                c.setFillColor(colors.HexColor("#E8E8E8"))
-                c.setFont("Helvetica-Bold", max(4, int(hull_h * 0.12)))
-                _hull_mid_x = (stern_x + 65 + bow_x - 25) / 2
-                _hull_name_y = mid_y + hull_h * 0.35
-                c.drawCentredString(_hull_mid_x, _hull_name_y, _buq_nm)
-
-            # --- Superestructura (casillaje) mejorada ---
-            cas_x = stern_x
-            cas_w = 60
-            # Nivel 1 - acomodaciones con ventanas
-            c.setFillColor(colors.HexColor("#F2F3F4"))
-            c.setStrokeColor(colors.HexColor("#ABB2B9"))
-            c.setLineWidth(0.8)
-            c.roundRect(cas_x, hull_top_y, cas_w, 20, 2, fill=1, stroke=1)
-            # Ventanas nivel 1
-            for wni in range(3):
-                wnx = cas_x + 6 + wni*16
-                c.setFillColor(colors.HexColor("#AED6F1")); c.setStrokeColor(colors.HexColor("#5D6D7E")); c.setLineWidth(0.5)
-                c.roundRect(wnx, hull_top_y+5, 10, 8, 1, fill=1, stroke=1)
-                c.setFillColor(colors.HexColor("#FDFEFF")); c.setLineWidth(0)
-                c.rect(wnx+1, hull_top_y+10, 4, 2, fill=1, stroke=0)
-
-            # Nivel 2 - puente de mando con ventanas
-            c.setFillColor(colors.HexColor("#E5E7E9"))
-            c.roundRect(cas_x + 4, hull_top_y + 20, cas_w - 8, 14, 2, fill=1, stroke=1)
-            # Ventanas puente
-            for bni in range(4):
-                bnx = cas_x + 6 + bni*12
-                c.setFillColor(colors.HexColor("#D6EAF8")); c.setStrokeColor(colors.HexColor("#85C1E9")); c.setLineWidth(0.5)
-                c.roundRect(bnx, hull_top_y+23, 9, 7, 1, fill=1, stroke=1)
-
-            # Nivel 3 - alas del puente
-            c.setFillColor(colors.HexColor("#D5D8DC")); c.setStrokeColor(colors.HexColor("#ABB2B9")); c.setLineWidth(0.6)
-            c.roundRect(cas_x - 5, hull_top_y + 30, cas_w + 10, 7, 1, fill=1, stroke=1)
-
-            # Chimenea
-            chim_x = cas_x + cas_w/2 - 7
-            chim_y = hull_top_y + 37
-            c.setFillColor(colors.HexColor("#C0392B"))
-            c.setStrokeColor(colors.HexColor("#922B21"))
-            c.roundRect(chim_x, chim_y, 14, 18, 2, fill=1, stroke=1)
-            # Franjas chimenea
-            c.setFillColor(colors.HexColor("#1B2631"))
-            c.rect(chim_x + 1, chim_y + 13, 12, 3, fill=1, stroke=0)
-            c.setFillColor(colors.HexColor("#F4D03F"))
-            c.rect(chim_x + 1, chim_y + 10, 12, 2, fill=1, stroke=0)
-            # Humo de chimenea (elipses difusas)
-            for sm_i, (sm_r, sm_a) in enumerate([(3,0),(4,2),(5,4)]):
-                c.setFillColor(colors.HexColor("#C8D6DF")); c.setLineWidth(0)
-                c.ellipse(chim_x+7+sm_a-sm_r, chim_y+18+sm_i*4,
-                          chim_x+7+sm_a+sm_r, chim_y+18+sm_i*4+sm_r*1.3, fill=1, stroke=0)
-            # --- Mastil de proa con antenas ---
-            mast_x = bow_x - 20
-            c.setStrokeColor(colors.HexColor("#626567"))
-            c.setLineWidth(1.5)
-            c.line(mast_x, hull_top_y, mast_x, hull_top_y + 32)
-            c.setLineWidth(0.7)
-            c.line(mast_x - 8, hull_top_y + 24, mast_x + 8, hull_top_y + 24)  # verga
-            # Antena de radar (círculo pequeño rotado)
-            c.setStrokeColor(colors.HexColor("#E74C3C")); c.setLineWidth(0.6)
-            c.line(mast_x-6, hull_top_y+30, mast_x+6, hull_top_y+28)
-            c.line(mast_x-6, hull_top_y+26, mast_x+6, hull_top_y+28)
-            # Luz de tope (blanca)
-            c.setFillColor(colors.HexColor("#F4D03F")); c.setLineWidth(0)
-            c.circle(mast_x, hull_top_y + 32, 2, fill=1, stroke=0)
-            # Luces laterales (verde estribor / rojo babor)
-            c.setFillColor(colors.HexColor("#27AE60"))
-            c.circle(mast_x + 8, hull_top_y + 24, 1.5, fill=1, stroke=0)
-            c.setFillColor(colors.HexColor("#E74C3C"))
-            c.circle(mast_x - 8, hull_top_y + 24, 1.5, fill=1, stroke=0)
-
-        # === TANQUES DE CARGA ===
-        target_side = "BABOR" if "BABOR" in title else "ESTRIBOR"
-        tanks_to_draw = [tk_name for tk_name in self.lista_tanques if target_side in tk_name]
-
-        if tanks_to_draw:
-            start_x = stern_x + 62
-            end_x = bow_x - 30
-            total_w = end_x - start_x
-            t_w = total_w / len(tanks_to_draw)
-            gap = 1.5
-            current_tx = start_x
-
-            tank_zone_top = hull_top_y - 2
-            tank_zone_bot = mid_y + 2
-            tank_h = tank_zone_top - tank_zone_bot
-
-            c.setLineWidth(0.5)
-
-            for t_name in tanks_to_draw:
-                val_liq = self.parse_float(self.get_var(f"{etapa_key}_{t_name}_s_corr").get())
-                val_ref = self.parse_float(self.get_var(f"{etapa_key}_{t_name}_alt_ref").get())
-                val_wat = self.parse_float(self.get_var(f"{etapa_key}_{t_name}_agua_s_real").get())
-                val_lit = self.get_var(f"{etapa_key}_{t_name}_vol_nat_prod").get()
-                prod_name = self.get_var(f"{etapa_key}_{t_name}_prod_name").get()
-
-                ref_h = val_ref if val_ref > 0 else 10000.0
-                altura_liquido = val_ref - val_liq
-                if altura_liquido < 0: altura_liquido = 0
-                pct_liq = min(altura_liquido / ref_h, 1.0)
-                pct_wat = min(val_wat / ref_h, 1.0) if val_wat > 0 else 0
-
-                px_fill = tank_h * pct_liq
-                px_wat_fill = tank_h * pct_wat
-
-                tx = current_tx + gap/2
-                tw = t_w - gap
-
-                # Fondo tanque (gris acero)
-                c.setFillColor(colors.HexColor("#4A545E"))
-                c.setStrokeColor(colors.HexColor("#2C3E50"))
-                c.roundRect(tx, tank_zone_bot, tw, tank_h, 2, fill=1, stroke=1)
-
-                # Agua (azul claro)
-                if px_wat_fill > 0:
-                    c.setFillColor(colors.HexColor("#5DADE2"))
-                    c.rect(tx + 0.5, tank_zone_bot + 0.5, tw - 1, px_wat_fill, fill=1, stroke=0)
-
-                # Producto — usar paleta sin azules (azul es exclusivo para AGUA)
-                px_prod = px_fill - px_wat_fill
-                if px_prod > 0:
-                    _col, _ = self.get_prod_color(t_name, etapa_key)
-                    c.setFillColor(colors.HexColor(_col))
-                    c.rect(tx + 0.5, tank_zone_bot + px_wat_fill, tw - 1, px_prod, fill=1, stroke=0)
-                else:
-                    _col = "#4A545E"
-
-                # Tapa tanque
-                c.setFillColor(colors.HexColor("#7F8C8D"))
-                c.rect(tx, tank_zone_top - 2, tw, 2, fill=1, stroke=0)
-
-                # Textos — contraste correcto vs color de producto
-                txt_col_ship = colors.HexColor(self.contrast_text(_col)) if pct_liq > 0.15 else colors.white
-                c.setFillColor(txt_col_ship)
-                c.setFont("Helvetica-Bold", 5.5)
-                short_name = t_name.replace("BABOR","B").replace("ESTRIBOR","E").strip()
-                center_y_tk = tank_zone_bot + (tank_h / 2)
-                c.drawCentredString(tx + tw/2, center_y_tk + 10, short_name)
-                c.setFont("Helvetica", 4.5)
-                c.drawCentredString(tx + tw/2, center_y_tk + 3, f"{pct_liq*100:.0f}%")
-                if prod_name:
-                    c.setFont("Helvetica", 4)
-                    c.drawCentredString(tx + tw/2, center_y_tk - 4, prod_name[:17])
-                if val_lit:
-                    c.setFont("Helvetica", 4)
-                    c.drawCentredString(tx + tw/2, center_y_tk - 10, f"{val_lit} L")
-
-                current_tx += t_w
-
-        # === CARBONERA (filtrada por lado, igual que los tanques) ===
-        if self.lista_carbonera:
-            # Filtrar carboneras para esta vista
-            carbs_to_draw = []
-            for c_name in self.lista_carbonera:
-                c_upper = c_name.upper()
-                if target_side in c_upper:
-                    carbs_to_draw.append(c_name)
-                elif "BABOR" not in c_upper and "ESTRIBOR" not in c_upper:
-                    # Sin lado = AMBOS, aparece en las dos vistas
-                    carbs_to_draw.append(c_name)
-            
-            if carbs_to_draw:
-                carb_zone_x = stern_x + 2
-                carb_zone_w = 55
-                carb_individual_h = min(22, (hull_h * 0.35) / max(len(carbs_to_draw), 1))
-                # Posicionar entre mitad del casco y la cubierta (misma zona vertical que los tanques)
-                carb_y_start = mid_y + 2
-
-                for ci, c_name in enumerate(carbs_to_draw):
-                    cy_pos = carb_y_start + ci * (carb_individual_h + 2)
-
-                    val_liq = self.parse_float(self.get_var(f"{etapa_key}_{c_name}_s_corr").get())
-                    val_ref = self.parse_float(self.get_var(f"{etapa_key}_{c_name}_alt_ref").get())
-                    val_lit = self.get_var(f"{etapa_key}_{c_name}_vol_nat_prod").get()
-
-                    ref_h = val_ref if val_ref > 0 else 10000.0
-                    altura_liquido = val_ref - val_liq
-                    if altura_liquido < 0: altura_liquido = 0
-                    pct_liq = min(altura_liquido / ref_h, 1.0)
-                    px_fill = carb_individual_h * pct_liq
-
-                    # Fondo (crema cálido)
-                    c.setFillColor(colors.HexColor("#FEF9E7"))
-                    c.setStrokeColor(colors.HexColor("#D4AC0D"))
-                    c.setLineWidth(1)
-                    c.roundRect(carb_zone_x, cy_pos, carb_zone_w, carb_individual_h, 3, fill=1, stroke=1)
-
-                    # Producto (dorado)
-                    if px_fill > 0:
-                        c.setFillColor(colors.HexColor("#F0B429"))
-                        c.rect(carb_zone_x + 1, cy_pos + 1, carb_zone_w - 2, min(px_fill, carb_individual_h - 2), fill=1, stroke=0)
-
-                    # Texto
-                    c.setFillColor(colors.HexColor("#6E4B00"))
-                    c.setFont("Helvetica-Bold", 5)
-                    ccy = cy_pos + carb_individual_h / 2
-                    short_carb = c_name.replace("BABOR","B").replace("ESTRIBOR","E").strip()
-                    c.drawCentredString(carb_zone_x + carb_zone_w/2, ccy + 3, short_carb[:14])
-                    c.setFont("Helvetica", 4)
-                    info_parts = []
-                    if val_lit: info_parts.append(f"{val_lit} L")
-                    info_parts.append(f"{pct_liq*100:.0f}%")
-                    c.drawCentredString(carb_zone_x + carb_zone_w/2, ccy - 4, " | ".join(info_parts))
-
-        c.restoreState()
-
-        # === VISTA DE POPA (ESCORA) ===
-        x_popa = x + width + 20
-        y_popa = y + 30
-        size_popa = 70
-
-        c.setFont("Helvetica-Bold", 7)
-        c.setFillColor(colors.HexColor("#1B3A5C"))
-        c.drawCentredString(x_popa + size_popa/2, y_popa + size_popa + 15, "VISTA POPA")
-
-        list_val = self.parse_float(self.get_var(f"{etapa_key}_Lista").get())
-        angle_list = list_val * 2.5
-        if angle_list > 15: angle_list = 15
-        if angle_list < -15: angle_list = -15
-
-        # Agua de fondo popa
-        c.setFillColor(colors.HexColor("#D6EAF8"))
-        wl_y = y_popa + size_popa * 0.45
-        c.rect(x_popa - 10, y_popa - 5, size_popa + 20, wl_y - y_popa + 8, fill=1, stroke=0)
-
+        # Obra viva (antifouling) recortada al casco, hasta la flotación
         c.saveState()
-        c.translate(x_popa + size_popa/2, y_popa + size_popa/2)
-        c.rotate(angle_list)
-        c.translate(-(x_popa + size_popa/2), -(y_popa + size_popa/2))
-
-        c.setLineWidth(1)
-        c.setStrokeColor(colors.HexColor("#1B2631"))
-
-        if tipo_nave == "BARCAZA":
-            c.setFillColor(colors.HexColor("#2C3E50"))
-            c.roundRect(x_popa, y_popa + 15, size_popa, size_popa * 0.5, 4, fill=1, stroke=1)
-            # Franja roja
-            c.setFillColor(colors.HexColor("#922B21"))
-            c.rect(x_popa + 1, y_popa + 16, size_popa - 2, size_popa * 0.2, fill=1, stroke=0)
-        else:
-            # Casco superior
-            p = c.beginPath()
-            p.moveTo(x_popa + 3, y_popa + size_popa)
-            p.lineTo(x_popa + size_popa - 3, y_popa + size_popa)
-            p.lineTo(x_popa + size_popa - 3, y_popa + 15)
-            p.curveTo(x_popa + size_popa * 0.7, y_popa, x_popa + size_popa * 0.3, y_popa, x_popa + 3, y_popa + 15)
-            p.close()
-            c.setFillColor(colors.HexColor("#1B2631"))
-            c.drawPath(p, fill=1, stroke=1)
-            # Quilla roja
-            mid_popa = y_popa + size_popa * 0.45
-            p2 = c.beginPath()
-            p2.moveTo(x_popa + 3, mid_popa)
-            p2.lineTo(x_popa + size_popa - 3, mid_popa)
-            p2.lineTo(x_popa + size_popa - 3, y_popa + 15)
-            p2.curveTo(x_popa + size_popa * 0.7, y_popa, x_popa + size_popa * 0.3, y_popa, x_popa + 3, y_popa + 15)
-            p2.close()
-            c.setFillColor(colors.HexColor("#7B241C"))
-            c.drawPath(p2, fill=1, stroke=0)
-            # Franja blanca
-            c.setStrokeColor(colors.HexColor("#F0F0F0"))
-            c.setLineWidth(0.8)
-            c.line(x_popa + 4, mid_popa, x_popa + size_popa - 4, mid_popa)
-
+        c.clipPath(p_hull, stroke=0, fill=0)
+        p_red = c.beginPath()
+        p_red.moveTo(stern_tip - 6, keel_y - 8)
+        p_red.lineTo(stern_tip - 6, wl_st + 2)
+        p_red.lineTo(bow_tip + 6, wl_bw + 2)
+        p_red.lineTo(bow_tip + 6, keel_y - 8)
+        p_red.close()
+        c.setFillColor(ROJO)
+        c.drawPath(p_red, fill=1, stroke=0)
+        c.setStrokeColor(colors.HexColor("#ECF0F1")); c.setLineWidth(1.3)
+        c.line(stern_tip - 6, wl_st + 2.6, bow_tip + 6, wl_bw + 2.6)
         c.restoreState()
 
-        # Linea de agua (horizontal real)
-        c.setStrokeColor(colors.HexColor("#2E86C1"))
-        c.setLineWidth(1.2)
-        c.setDash(4, 2)
-        c.line(x_popa - 8, wl_y, x_popa + size_popa + 8, wl_y)
-        c.setDash()
+        # ── Bulbo, hélice y timón ──────────────────────────────────────────
+        if not es_barcaza:
+            prop_cy = keel_y + hull_h * 0.18
+            c.setFillColor(colors.HexColor("#B7950B")); c.setStrokeColor(colors.HexColor("#7D6608"))
+            c.setLineWidth(0.6)
+            c.circle(stern_x - 8, prop_cy, 3.6, fill=1, stroke=1)
+            c.setFillColor(GRIS); c.setStrokeColor(CASCO_B)
+            p_tim = c.beginPath()
+            p_tim.moveTo(stern_x - 13, prop_cy + 5); p_tim.lineTo(stern_x - 18, prop_cy + 3)
+            p_tim.lineTo(stern_x - 18, prop_cy - 5); p_tim.lineTo(stern_x - 13, prop_cy - 3)
+            p_tim.close()
+            c.drawPath(p_tim, fill=1, stroke=1)
 
-        # Etiquetas B / E con info de lista
-        c.setFont("Helvetica-Bold", 6)
-        c.setFillColor(colors.HexColor("#1B3A5C"))
-        c.drawCentredString(x_popa - 5, y_popa + size_popa * 0.7, "B")
-        c.drawCentredString(x_popa + size_popa + 5, y_popa + size_popa * 0.7, "E")
-        # Ángulo de lista si hay escora
-        if abs(list_val) > 0.05:
-            _list_col = "#E74C3C" if abs(list_val) > 1.5 else "#F4D03F"
-            c.setFillColor(colors.HexColor(_list_col))
+        # ── Compartimentos (tanques) dentro del casco ─────────────────────
+        target_side = "BABOR" if "BABOR" in title else "ESTRIBOR"
+        tanks_to_draw = [t for t in self.lista_tanques
+                         if target_side in t.upper()
+                         or ("BABOR" not in t.upper() and "ESTRIBOR" not in t.upper())]
+        carbs_to_draw = [cn for cn in self.lista_carbonera
+                         if target_side in cn.upper()
+                         or ("BABOR" not in cn.upper() and "ESTRIBOR" not in cn.upper())]
+
+        acc_w  = 0 if es_barcaza else 58
+        carb_w = 22 if carbs_to_draw else 0
+        tz0    = stern_x + 2 + acc_w + carb_w + 3
+        tz1    = bow_x - (10 if es_barcaza else 24)
+        top_t  = deck_y - 2.5
+        bot_t  = keel_y + 5
+
+        def _dibujar_compart(cx0, cw, nombre, corto, es_carb=False):
+            s_corr  = self.parse_float(self.get_var(f"{etapa}_{nombre}_s_corr").get())
+            alt_ref = self.parse_float(self.get_var(f"{etapa}_{nombre}_alt_ref").get())
+            agua_mm = self.parse_float(self.get_var(f"{etapa}_{nombre}_agua_s_real").get())
+            vol_str = self.get_var(f"{etapa}_{nombre}_vol_nat_prod").get()
+            prod    = self.get_var(f"{etapa}_{nombre}_prod_name").get()
+            pct   = max(0.0, min(1.0, s_corr / alt_ref)) if alt_ref > 0 else 0.0
+            pagua = max(0.0, min(pct, agua_mm / alt_ref)) if alt_ref > 0 else 0.0
+            th = top_t - bot_t
+            c.setFillColor(colors.HexColor("#FDFEFE")); c.setStrokeColor(colors.HexColor("#4D5656"))
+            c.setLineWidth(0.7)
+            c.rect(cx0, bot_t, cw, th, fill=1, stroke=1)
+            if pct > 0.003:
+                try:    col_hex, _ = self.get_prod_color(nombre, etapa)
+                except Exception: col_hex = "#F1C40F"
+                fh = max(1.2, th * pct)
+                c.setFillColor(colors.HexColor(col_hex))
+                c.rect(cx0 + 0.6, bot_t + 0.6, cw - 1.2, fh - 0.6, fill=1, stroke=0)
+                c.setStrokeColor(colors.HexColor("#566573")); c.setLineWidth(0.4)
+                c.line(cx0 + 0.6, bot_t + fh, cx0 + cw - 0.6, bot_t + fh)
+            if pagua > 0.004:
+                c.setFillColor(colors.HexColor("#1A5276"))
+                c.rect(cx0 + 0.6, bot_t + 0.6, cw - 1.2, max(1, th * pagua - 0.6), fill=1, stroke=0)
+            # etiqueta: chip blanco arriba del compartimento
+            angosto = cw < 40
+            chip_h = 7 if angosto else 12.5
+            chip_y = top_t - chip_h - 1
+            c.setFillAlpha(0.92)
+            c.setFillColor(colors.white); c.setStrokeColor(colors.HexColor("#95A5A6")); c.setLineWidth(0.4)
+            c.roundRect(cx0 + 1, chip_y, cw - 2, chip_h, 1.5, fill=1, stroke=1)
+            c.setFillAlpha(1)
+            c.setFillColor(AZUL)
+            if angosto:
+                c.setFont("Helvetica-Bold", 4)
+                c.drawCentredString(cx0 + cw / 2, chip_y + 2, f"{corto[:8]} {pct*100:.0f}%")
+            else:
+                c.setFont("Helvetica-Bold", 5)
+                c.drawCentredString(cx0 + cw / 2, chip_y + chip_h - 5, corto[:16])
+                c.setFillColor(colors.HexColor("#273746"))
+                c.setFont("Helvetica", 4.4)
+                l2 = f"{pct*100:.0f}%"
+                if vol_str: l2 += f" · {vol_str} L"
+                if prod: l2 = f"{prod[:9]} · " + l2
+                _maxc = max(6, int(cw / 2.4))   # truncar al ancho del tanque
+                c.drawCentredString(cx0 + cw / 2, chip_y + 2.2, l2[:_maxc])
+
+        n_t = len(tanks_to_draw)
+        if n_t and tz1 - tz0 > 30:
+            gap = 2.5
+            tw = (tz1 - tz0 - gap * (n_t - 1)) / n_t
+            for i, t_name in enumerate(tanks_to_draw):
+                corto = t_name.replace("BABOR", "B").replace("ESTRIBOR", "E").strip()
+                _dibujar_compart(tz0 + i * (tw + gap), tw, t_name, corto)
+        if carbs_to_draw:
+            for cn in carbs_to_draw[:1]:
+                corto = cn.replace("CARBONERA", "CB").replace("BABOR", "B").replace("ESTRIBOR", "E").strip()
+                _dibujar_compart(stern_x + 2 + acc_w + 1, carb_w, cn, corto, es_carb=True)
+
+        # ── Superestructura (a popa) ───────────────────────────────────────
+        if not es_barcaza:
+            ax0 = stern_x + 2
+            aw  = acc_w - 6
+            nh  = 7.5
+            for ni in range(3):
+                yy = deck_y + ni * nh
+                shr = ni * 2
+                c.setFillColor(colors.HexColor("#F4F6F7")); c.setStrokeColor(colors.HexColor("#909BA5"))
+                c.setLineWidth(0.5)
+                c.rect(ax0 + shr, yy, aw - shr * 2, nh, fill=1, stroke=1)
+                c.setFillColor(colors.HexColor("#5DADE2"))
+                nw = max(2, int((aw - shr * 2 - 6) // 6))
+                for wi in range(nw):
+                    c.rect(ax0 + shr + 3.5 + wi * 6, yy + nh * 0.34, 3.4, nh * 0.34, fill=1, stroke=0)
+            by = deck_y + 3 * nh
+            c.setFillColor(colors.HexColor("#EAECEE")); c.setStrokeColor(colors.HexColor("#909BA5"))
+            c.rect(ax0 + 5, by, aw - 10, 6, fill=1, stroke=1)
+            c.setFillColor(colors.HexColor("#2E4053"))
+            c.rect(ax0 + 6.2, by + 1.8, aw - 12.4, 2.8, fill=1, stroke=0)
+            # chimenea
+            fx = ax0 + aw - 10
+            c.setFillColor(AZUL); c.setStrokeColor(CASCO_B); c.setLineWidth(0.5)
+            p_fun = c.beginPath()
+            p_fun.moveTo(fx, deck_y + nh * 1.6); p_fun.lineTo(fx + 8.5, deck_y + nh * 1.6)
+            p_fun.lineTo(fx + 7.2, by + 10); p_fun.lineTo(fx + 1.3, by + 10)
+            p_fun.close()
+            c.drawPath(p_fun, fill=1, stroke=1)
+            c.setFillColor(colors.white)
+            c.rect(fx + 1.9, by + 5.4, 4.8, 2.2, fill=1, stroke=0)
+            # mástil radar + luz
+            mx = ax0 + 13
+            c.setStrokeColor(colors.HexColor("#424949")); c.setLineWidth(0.7)
+            c.line(mx, by + 6, mx, by + 13)
+            c.line(mx - 3.5, by + 10.5, mx + 3.5, by + 10.5)
+            c.setFillColor(colors.HexColor("#E74C3C")); c.circle(mx, by + 13.5, 0.9, fill=1, stroke=0)
+            # castillo y mástil de proa
+            c.setFillColor(colors.HexColor("#D5DBDB")); c.setStrokeColor(colors.HexColor("#909BA5"))
+            c.setLineWidth(0.5)
+            c.rect(bow_x - 18, deck_y + sheer, 15, 3.6, fill=1, stroke=1)
+            c.setStrokeColor(colors.HexColor("#424949")); c.setLineWidth(0.7)
+            c.line(bow_x - 4, deck_y + sheer + 3, bow_x - 4, deck_y + sheer + 13)
+            c.line(bow_x - 4, deck_y + sheer + 10, bow_x + 5, deck_y + sheer + 6.5)
+        else:
+            ax0 = stern_x + 2
+            c.setFillColor(colors.HexColor("#F4F6F7")); c.setStrokeColor(colors.HexColor("#909BA5"))
+            c.setLineWidth(0.5)
+            c.rect(ax0, deck_y, 24, 8, fill=1, stroke=1)
+            c.rect(ax0 + 3, deck_y + 8, 18, 7, fill=1, stroke=1)
+            c.setFillColor(colors.HexColor("#5DADE2"))
+            for wi in range(3):
+                c.rect(ax0 + 4.5 + wi * 5.5, deck_y + 10, 3.6, 3.2, fill=1, stroke=0)
+            c.setStrokeColor(colors.HexColor("#424949")); c.setLineWidth(0.7)
+            c.line(ax0 + 12, deck_y + 15, ax0 + 12, deck_y + 21)
+            c.setFillColor(colors.HexColor("#E74C3C")); c.circle(ax0 + 12, deck_y + 21.5, 0.9, fill=1, stroke=0)
+
+        # nombre en la amura
+        _nm = (self.get_var("car_buque").get() or "").upper()[:22]
+        if _nm and not es_barcaza:
+            c.setFont("Helvetica-Bold", 4.4)
+            c.setFillColor(colors.HexColor("#BDC3C7"))
+            c.drawRightString(bow_x - 8, (deck_y + max(wl_bw, wl_st)) / 2 + 2.5, _nm)
+
+        # ── Línea de flotación sobre el casco + olas ───────────────────────
+        c.setStrokeColor(MAR_LIN); c.setLineWidth(1.1)
+        c.line(px0, sea_top_st, px1, sea_top_bw)
+        c.setLineWidth(0.55); c.setStrokeColor(colors.HexColor("#5499C7"))
+        for wxi in range(7):
+            wx = px0 + 14 + wxi * (px1 - px0 - 28) / 6.0
+            if stern_tip - 14 < wx < bow_tip + 14: continue
+            wy = sea_top_st + (sea_top_bw - sea_top_st) * ((wx - px0) / max(1, px1 - px0)) - 2.6
+            c.arc(wx - 5, wy - 1.8, wx + 5, wy + 1.8, 200, 140)
+
+        # ── Escalas de calado ──────────────────────────────────────────────
+        def _escala(ex, calado, wl_y, lado):
+            c.setStrokeColor(colors.HexColor("#34495E")); c.setLineWidth(0.7)
+            c.line(ex, keel_y, ex, deck_y + 3)
+            m = 0
+            while m <= puntal_m + 0.01:
+                yy = keel_y + m * px_m
+                mayor = (m % 2 == 0)
+                tick = 3 if mayor else 1.7
+                c.setLineWidth(0.6 if mayor else 0.35)
+                c.line(ex - (tick if lado == "izq" else 0), yy, ex + (tick if lado == "der" else 0), yy)
+                if mayor and m > 0:
+                    c.setFont("Helvetica", 3.8)
+                    c.setFillColor(colors.HexColor("#34495E"))
+                    if lado == "izq": c.drawRightString(ex - 4, yy - 1.3, f"{m}")
+                    else: c.drawString(ex + 4, yy - 1.3, f"{m}")
+                m += 1
+            c.setFillColor(colors.HexColor("#C0392B"))
+            p_fl = c.beginPath()
+            dx = -1 if lado == "izq" else 1
+            p_fl.moveTo(ex + dx * 2.5, wl_y)
+            p_fl.lineTo(ex + dx * 8, wl_y + 2.6); p_fl.lineTo(ex + dx * 8, wl_y - 2.6)
+            p_fl.close()
+            c.drawPath(p_fl, fill=1, stroke=0)
             c.setFont("Helvetica-Bold", 5)
-            _list_side = "B" if list_val > 0 else "E"
-            c.drawCentredString(x_popa + size_popa/2, y_popa - 3,
-                                f"Lista: {abs(list_val):.2f}° → {_list_side}")
-        # Calados de babor/estribor si están disponibles
-        try:
-            _c_bab = self.parse_float(self.get_var(f"{etapa_key}_Calados Babor").get() or "0")
-            _c_est = self.parse_float(self.get_var(f"{etapa_key}_Calados Estribor").get() or "0")
-            if _c_bab > 0 or _c_est > 0:
-                c.setFillColor(colors.HexColor("#4A90D9"))
-                c.setFont("Helvetica", 4.5)
-                if _c_bab > 0:
-                    c.drawCentredString(x_popa - 5, y_popa + size_popa * 0.55, f"{_c_bab:.2f}m")
-                if _c_est > 0:
-                    c.drawCentredString(x_popa + size_popa + 5, y_popa + size_popa * 0.55, f"{_c_est:.2f}m")
-        except: pass
+            c.setFillColor(colors.HexColor("#C0392B"))
+            if lado == "izq": c.drawRightString(ex - 4, wl_y + 4, f"{calado:.2f} m")
+            else: c.drawString(ex + 4, wl_y + 4, f"{calado:.2f} m")
+        _escala(stern_tip - 13, c_popa, wl_st, "izq")
+        _escala(bow_tip + 13, c_proa, wl_bw, "der")
+
+        # ── Anotaciones ────────────────────────────────────────────────────
+        c.setFont("Helvetica-Bold", 5.5); c.setFillColor(GRIS)
+        c.drawString(bow_x + 4, y + 1.5, "PROA →")
+        c.drawRightString(stern_x - 4, y + 1.5, "← POPA")
+        _tr = trim_sign
+        _tr_lbl = "apopado" if _tr > 0.005 else ("aproado" if _tr < -0.005 else "adrizado")
+        c.setFont("Helvetica", 5.5); c.setFillColor(MAR_LIN)
+        c.drawCentredString((px0 + px1) / 2, y + 1.5,
+                            f"Asiento: {_tr:+.2f} m ({_tr_lbl})   |   Calado medio: {(c_proa+c_popa)/2:.2f} m")
+
+        # ── Vista de popa (sección transversal) con escora ─────────────────
+        vx0 = px1 + 16
+        vw  = popa_w - 6
+        vy0 = y + 16
+        vh  = height - 42
+        c.setFont("Helvetica-Bold", 6); c.setFillColor(AZUL)
+        c.drawCentredString(vx0 + vw / 2, vy0 + vh + 6, "VISTA POPA")
+        lista_v = self.parse_float(self.get_var(f"{etapa}_Lista").get() or "0")
+        c_bab = self.parse_float(self.get_var(f"{etapa}_Calados Babor").get() or "0")
+        c_est = self.parse_float(self.get_var(f"{etapa}_Calados Estribor").get() or "0")
+        cal_med2 = (c_bab + c_est) / 2 if (c_bab or c_est) else (c_proa + c_popa) / 2
+        bw2 = vw * 0.26                     # semimanga
+        bh2 = vh * 0.44                     # semi-altura de la sección
+        scx = vx0 + vw / 2
+        scy = vy0 + vh * 0.52
+        wl_sec = scy - bh2 + min(cal_med2, puntal_m) / puntal_m * (2 * bh2) * 0.92
+        # mar de fondo
+        c.setFillColor(MAR)
+        c.rect(vx0 - 2, vy0 - 2, vw + 4, max(4, wl_sec - vy0 + 2), fill=1, stroke=0)
+        # sección con escora
+        ang = max(-8.0, min(8.0, lista_v * 5))
+        c.saveState()
+        c.translate(scx, scy); c.rotate(ang); c.translate(-scx, -scy)
+        p_sec = c.beginPath()
+        p_sec.moveTo(scx - bw2, scy + bh2)
+        p_sec.lineTo(scx - bw2, scy - bh2 * 0.30)
+        p_sec.curveTo(scx - bw2, scy - bh2 * 0.92, scx - bw2 * 0.5, scy - bh2, scx, scy - bh2)
+        p_sec.curveTo(scx + bw2 * 0.5, scy - bh2, scx + bw2, scy - bh2 * 0.92, scx + bw2, scy - bh2 * 0.30)
+        p_sec.lineTo(scx + bw2, scy + bh2)
+        p_sec.close()
+        c.setFillColor(CASCO); c.setStrokeColor(CASCO_B); c.setLineWidth(0.9)
+        c.drawPath(p_sec, fill=1, stroke=1)
+        c.saveState()
+        c.clipPath(p_sec, stroke=0, fill=0)
+        c.setFillColor(ROJO)
+        c.rect(scx - bw2 - 3, scy - bh2 - 3, bw2 * 2 + 6, (wl_sec - (scy - bh2)) + 3, fill=1, stroke=0)
+        c.setStrokeColor(colors.HexColor("#ECF0F1")); c.setLineWidth(1.1)
+        c.line(scx - bw2 - 3, wl_sec + 1.4, scx + bw2 + 3, wl_sec + 1.4)
+        c.restoreState()
+        # caseta con camber en cubierta
+        c.setFillColor(colors.HexColor("#F4F6F7")); c.setStrokeColor(colors.HexColor("#909BA5"))
+        c.setLineWidth(0.5)
+        c.rect(scx - bw2 * 0.45, scy + bh2, bw2 * 0.9, 6, fill=1, stroke=1)
+        c.setFillColor(colors.HexColor("#5DADE2"))
+        c.rect(scx - bw2 * 0.32, scy + bh2 + 1.8, bw2 * 0.64, 2.4, fill=1, stroke=0)
+        # timón bajo el casco
+        c.setStrokeColor(CASCO_B); c.setLineWidth(1)
+        c.line(scx, scy - bh2, scx, scy - bh2 - 5)
+        c.restoreState()
+        # línea de flotación por encima (horizontal — la escora se ve contra el agua)
+        c.setStrokeColor(MAR_LIN); c.setLineWidth(1)
+        c.line(vx0 - 2, wl_sec, vx0 + vw + 2, wl_sec)
+        c.setFont("Helvetica-Bold", 5); c.setFillColor(AZUL)
+        c.drawString(vx0, vy0 + vh - 2, "BABOR")
+        c.drawRightString(vx0 + vw, vy0 + vh - 2, "ESTRIBOR")
+        c.setFont("Helvetica", 4.8); c.setFillColor(colors.HexColor("#34495E"))
+        _esc_lbl = f"Escora: {lista_v:+.2f} m"
+        if c_bab or c_est: _esc_lbl += f"  (B {c_bab:.2f} / E {c_est:.2f})"
+        c.drawCentredString(vx0 + vw / 2, vy0 - 9, _esc_lbl)
+
+        c.restoreState()
 
     def generar_reporte_tecnico_global(self, suffix, output_folder, shared_canvas=None):
         clean_name = self.clean_filename(self.get_var('car_buque').get())
