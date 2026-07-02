@@ -2669,6 +2669,51 @@ class PdfReportsMixin:
             return None
         return None
 
+    def _trim_dos_puntos(self, etapa, tk_name, agua=False):
+        """Para un tanque con tabla × asiento, devuelve los 2 puntos (sondaje, litros)
+        que rodean el sondaje medido, con los litros ya interpolados al asiento real.
+        Son los mismos 2 puntos entre los que se interpola el volumen final, así que
+        sirven para llenar las columnas SOND1/LTS1/SOND2/LTS2 de la planilla.
+        Devuelve (s1, l1, s2, l2) como strings, o ('','','','') si no hay tabla."""
+        obj = self._trim_obj(etapa, tk_name, agua)
+        if not obj:
+            return "", "", "", ""
+        trims = [float(t) for t in obj["trims"]]
+        rows = sorted([r for r in obj["rows"] if r and r[0] is not None], key=lambda r: r[0])
+        if not rows:
+            return "", "", "", ""
+        s_key = f"{etapa}_{tk_name}_agua_s_real" if agua else f"{etapa}_{tk_name}_s_corr"
+        s = self.parse_float(self.get_var(s_key).get())
+        trim_real = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+
+        def _lit_row(r):
+            pts = [(trims[c], r[c+1]) for c in range(len(trims))
+                   if len(r) > c+1 and r[c+1] is not None]
+            return self._interp_1d(pts, trim_real)
+
+        sonds = [r[0] for r in rows]
+        if len(rows) == 1:
+            i = j = 0
+        elif s <= sonds[0]:
+            i, j = 0, 1
+        elif s >= sonds[-1]:
+            i, j = len(rows) - 2, len(rows) - 1
+        else:
+            i, j = len(rows) - 2, len(rows) - 1
+            for k in range(len(rows) - 1):
+                if sonds[k] <= s <= sonds[k + 1]:
+                    i, j = k, k + 1
+                    break
+
+        def _f(n):
+            return f"{n:.0f}" if n is not None else ""
+
+        l_i = _lit_row(rows[i])
+        if i == j:
+            return f"{rows[i][0]:g}", _f(l_i), "", ""
+        l_j = _lit_row(rows[j])
+        return f"{rows[i][0]:g}", _f(l_i), f"{rows[j][0]:g}", _f(l_j)
+
     def _dibujar_subtabla_trim(self, c, x, y, etapa, tk_name, agua=False):
         """Dibuja la sub-tabla de interpolación × asiento del tanque (litros por
         sondaje y por asiento) más el volumen interpolado, para que el PDF muestre
@@ -2899,7 +2944,14 @@ class PdfReportsMixin:
                     self.get_var(f"inicial_{tk_name}_temp").get(),
                     self.get_var(f"inicial_{tk_name}_vol_nat_prod").get()]
             else:
-                vals = [tk_name, self.get_var(f"inicial_{tk_name}_prod_name").get(), self.get_var(f"inicial_{tk_name}_num_uti").get(), self.get_var(f"inicial_{tk_name}_alt_ref").get(), self._celda_sin_marcador(f"inicial_{tk_name}_prod_s1"), self._celda_sin_marcador(f"inicial_{tk_name}_prod_l1"), self._celda_sin_marcador(f"inicial_{tk_name}_prod_s2"), self._celda_sin_marcador(f"inicial_{tk_name}_prod_l2"), self.get_var(f"inicial_{tk_name}_desc_tubo").get(), self.get_var(f"inicial_{tk_name}_s_corr").get(), self.get_var(f"inicial_{tk_name}_temp").get(), self.get_var(f"inicial_{tk_name}_vol_nat_prod").get()]
+                if self._trim_obj("inicial", tk_name):
+                    _s1, _l1, _s2, _l2 = self._trim_dos_puntos("inicial", tk_name)
+                else:
+                    _s1 = self._celda_sin_marcador(f"inicial_{tk_name}_prod_s1")
+                    _l1 = self._celda_sin_marcador(f"inicial_{tk_name}_prod_l1")
+                    _s2 = self._celda_sin_marcador(f"inicial_{tk_name}_prod_s2")
+                    _l2 = self._celda_sin_marcador(f"inicial_{tk_name}_prod_l2")
+                vals = [tk_name, self.get_var(f"inicial_{tk_name}_prod_name").get(), self.get_var(f"inicial_{tk_name}_num_uti").get(), self.get_var(f"inicial_{tk_name}_alt_ref").get(), _s1, _l1, _s2, _l2, self.get_var(f"inicial_{tk_name}_desc_tubo").get(), self.get_var(f"inicial_{tk_name}_s_corr").get(), self.get_var(f"inicial_{tk_name}_temp").get(), self.get_var(f"inicial_{tk_name}_vol_nat_prod").get()]
             for i, v in enumerate(vals):
                 if i < len(x_pos): c.drawString(x_pos[i], y, str(v))
             y -= 12
@@ -2977,7 +3029,14 @@ class PdfReportsMixin:
                     self.get_var(f"final_{tk_name}_temp").get(),
                     self.get_var(f"final_{tk_name}_vol_nat_prod").get()]
             else:
-                vals = [tk_name, self.get_var(f"final_{tk_name}_prod_name").get(), self.get_var(f"final_{tk_name}_num_uti").get(), self.get_var(f"final_{tk_name}_alt_ref").get(), self._celda_sin_marcador(f"final_{tk_name}_prod_s1"), self._celda_sin_marcador(f"final_{tk_name}_prod_l1"), self._celda_sin_marcador(f"final_{tk_name}_prod_s2"), self._celda_sin_marcador(f"final_{tk_name}_prod_l2"), self.get_var(f"final_{tk_name}_desc_tubo").get(), self.get_var(f"final_{tk_name}_s_corr").get(), self.get_var(f"final_{tk_name}_temp").get(), self.get_var(f"final_{tk_name}_vol_nat_prod").get()]
+                if self._trim_obj("final", tk_name):
+                    _s1, _l1, _s2, _l2 = self._trim_dos_puntos("final", tk_name)
+                else:
+                    _s1 = self._celda_sin_marcador(f"final_{tk_name}_prod_s1")
+                    _l1 = self._celda_sin_marcador(f"final_{tk_name}_prod_l1")
+                    _s2 = self._celda_sin_marcador(f"final_{tk_name}_prod_s2")
+                    _l2 = self._celda_sin_marcador(f"final_{tk_name}_prod_l2")
+                vals = [tk_name, self.get_var(f"final_{tk_name}_prod_name").get(), self.get_var(f"final_{tk_name}_num_uti").get(), self.get_var(f"final_{tk_name}_alt_ref").get(), _s1, _l1, _s2, _l2, self.get_var(f"final_{tk_name}_desc_tubo").get(), self.get_var(f"final_{tk_name}_s_corr").get(), self.get_var(f"final_{tk_name}_temp").get(), self.get_var(f"final_{tk_name}_vol_nat_prod").get()]
             for i, v in enumerate(vals):
                 if i < len(x_pos): c.drawString(x_pos[i], y, str(v))
             y -= 12
