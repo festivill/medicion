@@ -13,3 +13,5 @@ split_source.py
 python/
 get-pip.py
 *.zip
+caratulas/
+funcionarios.db.bak-*

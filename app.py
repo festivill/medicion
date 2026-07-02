@@ -80,6 +80,9 @@ class PlanillaFinalApp:
         filemenu.add_command(label="Cargar Datos (.meg)", command=self.cargar_datos)
         filemenu.add_command(label="Guardar Datos (.meg)...", command=self.guardar_datos_manual)
         filemenu.add_separator()
+        filemenu.add_command(label="Cargar Carátula...", command=self.cargar_caratula)
+        filemenu.add_command(label="Guardar Carátula...", command=self.guardar_caratula)
+        filemenu.add_separator()
         filemenu.add_command(label="Generar Reportes PDF...", command=self.generar_con_seleccion)
         filemenu.add_separator()
         filemenu.add_command(label="Salir", command=root.quit)
@@ -14201,6 +14204,115 @@ class PlanillaFinalApp:
         with open("autosave.json", 'w') as f: json.dump(data, f)
         self.root.after(30000, self.auto_save_loop)
     
+    # ═══════════════════════════════════════════════════════════════════════
+    # CARÁTULAS GUARDADAS — plantillas de carátula sin datos de medición
+    # ═══════════════════════════════════════════════════════════════════════
+    # Datos operativos de cada medición: NO se guardan en la plantilla
+    CARATULA_EXCLUIR = ("car_fecha", "car_num_planilla_gen", "car_mani",
+                        "car_conocimientos", "car_tipo_cambio")
+
+    def _caratulas_dir(self):
+        import sys
+        base = pathlib.Path(sys.executable).parent if getattr(sys, 'frozen', False) \
+            else pathlib.Path(__file__).resolve().parent
+        d = base / "caratulas"
+        d.mkdir(exist_ok=True)
+        return d
+
+    def guardar_caratula(self):
+        """Guarda la carátula actual (buque, actores, aduana, tipo, etc.)
+        como plantilla reutilizable, sin datos de medición."""
+        from tkinter import simpledialog
+        sugerido = self.get_var("car_buque").get().strip() or self.get_var("car_patente").get().strip() or "caratula"
+        nombre = simpledialog.askstring("Guardar Carátula",
+                                        "Nombre de la carátula:",
+                                        initialvalue=sugerido, parent=self.root)
+        if not nombre: return
+        data = {k: v.get() for k, v in self.vars.items()
+                if k.startswith("car_") and k not in self.CARATULA_EXCLUIR}
+        data["_tipo_medio"] = self.get_tipo_medio()
+        path = self._caratulas_dir() / f"{self.clean_filename(nombre)}.json"
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1)
+            messagebox.showinfo("Carátula guardada",
+                                f"Guardada como «{path.stem}».\n"
+                                "Solo datos de carátula (sin medición, MANI, viaje ni fecha).")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar la carátula:\n{e}")
+
+    def cargar_caratula(self):
+        """Selector de carátulas guardadas: cargar (doble click) o eliminar."""
+        d = self._caratulas_dir()
+        archivos = sorted(d.glob("*.json"))
+        if not archivos:
+            messagebox.showinfo("Sin carátulas",
+                                "No hay carátulas guardadas todavía.\n"
+                                "Use Archivo → Guardar Carátula… para crear una.")
+            return
+        top = tk.Toplevel(self.root)
+        top.title("Cargar Carátula")
+        top.geometry("520x420")
+        top.grab_set()
+        fh = tk.Frame(top, bg="#1B3A5C"); fh.pack(fill="x")
+        tk.Label(fh, text="CARÁTULAS GUARDADAS", bg="#1B3A5C", fg="white",
+                 font=("Arial", 10, "bold")).pack(side="left", padx=14, pady=8)
+        tk.Label(fh, text="Doble click = cargar", bg="#1B3A5C", fg="#AED6F1",
+                 font=("Arial", 8)).pack(side="right", padx=10)
+        f_l = tk.Frame(top); f_l.pack(fill="both", expand=True, padx=12, pady=8)
+        sb = ttk.Scrollbar(f_l, orient="vertical")
+        lb = tk.Listbox(f_l, font=("Arial", 10), yscrollcommand=sb.set, activestyle="dotbox")
+        sb.config(command=lb.yview)
+        sb.pack(side="right", fill="y"); lb.pack(side="left", fill="both", expand=True)
+        for p in archivos:
+            desc = p.stem
+            try:
+                with open(p, encoding="utf-8") as f: dj = json.load(f)
+                extra = dj.get("_tipo_medio", "")
+                if extra: desc += f"   [{extra}]"
+            except: pass
+            lb.insert("end", desc)
+        def _sel_path():
+            sel = lb.curselection()
+            return archivos[sel[0]] if sel else None
+        def _cargar():
+            p = _sel_path()
+            if not p: return
+            try:
+                with open(p, encoding="utf-8") as f: dj = json.load(f)
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo leer la carátula:\n{e}", parent=top)
+                return
+            # Tipo primero (dispara reinicio de tanques/tabs por trace)
+            tm = dj.get("_tipo_medio") or dj.get("car_tipo_medio")
+            if tm:
+                self.get_var("car_tipo_medio").set(tm)
+                self.get_var("car_tipo_nave").set(tm)
+            for k, v in dj.items():
+                if not k.startswith("car_") or k in self.CARATULA_EXCLUIR: continue
+                if k in ("car_tipo_medio", "car_tipo_nave"): continue
+                self.get_var(k).set(v)
+            top.destroy()
+            messagebox.showinfo("Carátula cargada",
+                                f"Carátula «{p.stem}» aplicada.\n"
+                                "Complete MANI, viaje, fecha y documentos de la operación.")
+        def _eliminar():
+            p = _sel_path()
+            if not p: return
+            if not messagebox.askyesno("Eliminar", f"¿Eliminar la carátula «{p.stem}»?", parent=top):
+                return
+            try: p.unlink()
+            except Exception: pass
+            top.destroy(); self.cargar_caratula()
+        lb.bind("<Double-1>", lambda e: _cargar())
+        fb = tk.Frame(top, bg="#2C3E50"); fb.pack(fill="x", side="bottom")
+        tk.Button(fb, text="  Cargar  ", bg="#27AE60", fg="white", font=("Arial", 9, "bold"),
+                  command=_cargar).pack(side="left", padx=12, pady=8, ipadx=8, ipady=3)
+        tk.Button(fb, text="Eliminar", bg="#C0392B", fg="white", font=("Arial", 8),
+                  command=_eliminar).pack(side="left", padx=4, pady=8, ipadx=6, ipady=2)
+        tk.Button(fb, text="Cancelar", bg="#7F8C8D", fg="white", font=("Arial", 8),
+                  command=top.destroy).pack(side="right", padx=12, pady=8, ipadx=6, ipady=2)
+
     def guardar_datos_manual(self):
         _buque_meg = self.clean_filename(self.get_var('car_buque').get()) or 'medicion'
         _fecha_meg = datetime.now().strftime('%Y%m%d')
