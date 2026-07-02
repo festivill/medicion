@@ -2653,6 +2653,84 @@ class PdfReportsMixin:
         v = self.get_var(var_key).get()
         return "" if v.strip().startswith("[") else v
 
+    def _trim_obj(self, etapa, tk_name, agua=False):
+        """Devuelve el dict de la tabla de calibrado × asiento del tanque
+        ({'trims': [...], 'rows': [[sondaje, v@t0, v@t1, ...], ...]}) o None."""
+        import json
+        key = f"{etapa}_{tk_name}_tabla_trim{'_agua' if agua else ''}_json"
+        raw = self.get_var(key).get()
+        if not raw:
+            return None
+        try:
+            obj = json.loads(raw)
+            if obj.get("trims") and obj.get("rows"):
+                return obj
+        except Exception:
+            return None
+        return None
+
+    def _dibujar_subtabla_trim(self, c, x, y, etapa, tk_name, agua=False):
+        """Dibuja la sub-tabla de interpolación × asiento del tanque (litros por
+        sondaje y por asiento) más el volumen interpolado, para que el PDF muestre
+        de dónde sale el dato. Devuelve el nuevo `y`. Si el tanque no usa tabla de
+        asiento, devuelve `y` sin cambios. No hace saltos de página: el llamador
+        debe asegurarse de que haya lugar (ver estimación de alto)."""
+        obj = self._trim_obj(etapa, tk_name, agua)
+        if not obj:
+            return y
+        trims = obj["trims"]
+        rows = [r for r in obj["rows"] if r and r[0] is not None]
+        _lit = "Lts.Agua" if agua else "Litros"
+        _que = "AGUA" if agua else "PRODUCTO"
+        s_key = f"{etapa}_{tk_name}_agua_s_real" if agua else f"{etapa}_{tk_name}_s_corr"
+        s_act = self.parse_float(self.get_var(s_key).get())
+        trim_real = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+        vol, _det = self._interp_trim_table(obj, s_act, trim_real)
+
+        x0 = x + 8
+        col_s = 82           # ancho columna sondaje
+        col_a = 70           # ancho por columna de asiento
+        hdr_w = col_s + col_a * len(trims)
+
+        def _fmt(n):
+            return f"{n:,.0f}".replace(",", ".")
+
+        # Título
+        c.setFont("Helvetica-Bold", 7)
+        c.setFillColor(colors.HexColor("#1B3A5C"))
+        c.drawString(x0, y, f"Interpolación × asiento ({_que}) — {_lit} por sondaje y asiento:")
+        y -= 11
+        # Encabezado
+        c.setFillColor(colors.HexColor("#EAF2F8"))
+        c.rect(x0, y-2, hdr_w, 10, fill=1, stroke=0)
+        c.setStrokeColor(colors.HexColor("#AEB6BF")); c.setLineWidth(0.4)
+        c.rect(x0, y-2, hdr_w, 10, fill=0, stroke=1)
+        c.setFont("Helvetica-Bold", 6.5)
+        c.setFillColor(colors.black)
+        c.drawString(x0+3, y, "Sondaje (mm)")
+        for i, t in enumerate(trims):
+            c.drawString(x0 + col_s + i*col_a + 3, y, f"@ {t:g} m")
+        y -= 11
+        # Filas de datos
+        c.setFont("Helvetica", 6.5)
+        for r in rows:
+            c.drawString(x0+3, y, f"{r[0]:g}")
+            for i in range(len(trims)):
+                val = r[i+1] if len(r) > i+1 and r[i+1] is not None else None
+                c.drawString(x0 + col_s + i*col_a + 3, y, _fmt(val) if val is not None else "—")
+            c.setStrokeColor(colors.HexColor("#D5DBDB")); c.setLineWidth(0.3)
+            c.line(x0, y-2, x0+hdr_w, y-2)
+            y -= 10
+        # Resultado interpolado
+        c.setFont("Helvetica-Bold", 7)
+        c.setFillColor(colors.HexColor("#1B3A5C"))
+        vol_txt = _fmt(vol) if vol is not None else "—"
+        c.drawString(x0, y-1,
+                     f"Asiento real: {trim_real:+.2f} m   →   Sondaje corr.: {s_act:.0f} mm"
+                     f"   →   Volumen interpolado: {vol_txt} L")
+        c.setFillColor(colors.black)
+        return y - 12
+
     def generar_reporte_tecnico_global(self, suffix, output_folder, shared_canvas=None):
         clean_name = self.clean_filename(self.get_var('car_buque').get())
         filename = f"Reporte_Tecnico_Global_{clean_name}_{datetime.now().strftime('%Y%m%d')}.pdf"
@@ -3006,10 +3084,12 @@ class PdfReportsMixin:
                         _d_air = dens / 1000.0 if dens > 2.0 else dens
                         kg_air_val = v15_val * (_d_air - 0.0011) if _d_air > 0 else 0
                     except: v15_val = 0; kg_air_val = 0
+                    _lbl_interp = ("Interpolación × asiento"
+                                   if self._trim_obj(etapa, tk_name) else "Interpolación tabla")
                     lines_m = [
                         f"  UTI Nro: {num_uti}  |  Alt.Referencia: {alt_ref} mm",
                         f"  1. Sondaje UTI: {s_uti} mm  —  Desc.tubo: {desc} mm  →  Sondaje Corr.: {s_corr} mm",
-                        f"  2. Interpolación tabla: {interp_str}  =  {vol_nat} Lts (bruto)",
+                        f"  2. {_lbl_interp}: {interp_str}  =  {vol_nat} Lts (bruto)",
                         f"  3. Agua de fondo: {agua_real} mm  →  {agua_lts} Lts  |  Vol.Neto: {_neto_v:,.0f} Lts",
                         f"  4. VCF ({tbl}): {vcf_str}  |  Vol.15°C: {_neto_v:,.0f}×VCF = {v15_val:,.0f} Lts",
                         f"  5. Dens.lab: {dens}  |  Temp: {temp}°C  |  Peso en aire: {v15_val:,.0f}×({dens}−0.0011) = {kg_air_val:,.0f} Kg",
@@ -3145,6 +3225,22 @@ class PdfReportsMixin:
                     c.setFillColor(colors.black)
                     c.drawString(40, y, line_m)
                     y -= 11
+
+                # Sub-tabla de interpolación × asiento (producto y/o agua) para
+                # tanques marítimos que usan tabla de calibrado por asiento.
+                if _es_liq_mar:
+                    for _agua in (False, True):
+                        _obj = self._trim_obj(etapa, tk_name, agua=_agua)
+                        if not _obj:
+                            continue
+                        _alto = 34 + 10 * len([r for r in _obj["rows"] if r and r[0] is not None])
+                        if y - _alto < 70:
+                            draw_signatures_2_lines(); c.showPage()
+                            draw_logo_header(f"MEMORIA DE CÁLCULO ({etapa.upper()} - CONT.)", etapa)
+                            y = h - 100; tanks_on_page = 0
+                        y = self._dibujar_subtabla_trim(c, 40, y, etapa, tk_name, agua=_agua)
+                        y -= 4
+
                 y -= 4
                 tanks_on_page += 1
 
