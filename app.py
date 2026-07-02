@@ -7533,8 +7533,8 @@ class PlanillaFinalApp:
             lbl_res.config(text=f"VOLUMEN INTERPOLADO:  {vol:,.0f} L".replace(",","."))
             lbl_det.config(text=det)
 
-        for e in entries + [e_tA, e_tB]:
-            e.bind("<KeyRelease>", _preview)
+        for vv in [v_tA, v_tB] + v_s + v_l[0] + v_l[1]:
+            vv.trace_add("write", _preview)
         _preview()
 
         f_foot = tk.Frame(top, bg="#154360", height=48)
