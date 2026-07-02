@@ -15,3 +15,5 @@ get-pip.py
 *.zip
 caratulas/
 funcionarios.db.bak-*
+medicion.log
+.venv/

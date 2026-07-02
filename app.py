@@ -43,12 +43,14 @@ from db import (
     db_get_funciones, db_guardar_funcion, db_eliminar_funcion,
 )
 from assets.icons import ICON_WINDOW_B64, ICON_REPORT_B64
+from applog import app_dir as _app_dir, instalar_hooks as _instalar_hooks
 
 class PlanillaFinalApp:
     def __init__(self, root):
         self.root = root
+        _instalar_hooks(root)   # errores no capturados → medicion.log
         self.root.title("Sistema de Medición - V120 (VCF gases: GLP K0/rho2 | GNL alpha=0.00468 | NH3 alpha=0.00226)")
-        self.root.geometry("1600x900") 
+        self.root.geometry("1600x900")
         
         self.setup_icon()
         
@@ -8873,9 +8875,15 @@ class PlanillaFinalApp:
                 l1 = _pfm(f"{etapa}_{tanque}_prod_l1")
                 s2 = _pfm(f"{etapa}_{tanque}_prod_s2")
                 l2 = _pfm(f"{etapa}_{tanque}_prod_l2")
-                if s2 == s1: val = l1
-                else: val = l1 + ((s - s1) / (s2 - s1)) * (l2 - l1)
-                self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{val:.0f}")
+                if s1 == 0 and s2 == 0 and l1 == 0 and l2 == 0:
+                    # Sin datos de interpolación: conservar el volumen ya
+                    # cargado (p.ej. geométrico de tierra/camión o manual)
+                    # en vez de pisarlo con 0 al recalcular para el PDF.
+                    val = self.parse_float(self.get_var(f"{etapa}_{tanque}_vol_nat_prod").get())
+                else:
+                    if s2 == s1: val = l1
+                    else: val = l1 + ((s - s1) / (s2 - s1)) * (l2 - l1)
+                    self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{val:.0f}")
             temp_str = self.get_var(f"{etapa}_{tanque}_temp").get()
             if not temp_str: return
             temp = self.parse_float(temp_str)
@@ -12868,12 +12876,14 @@ class PlanillaFinalApp:
                 d = v1 - v2
                 pct = (d / v1) * 1000 if v1 != 0 else 0
                 return f"{d:.5f} ({pct:.2f} ‰)"
-            c.drawString(col3, y_dens, f"Diferencia Doc vs Salida: {fmt_diff(dens_ddt, dens_salida_avg)}")
-            y_dens -= 10
-            c.drawString(col3, y_dens, f"Diferencia Salida vs Inicial: {fmt_diff(dens_salida_avg, avg_d_i)}")
-            y_dens -= 10
-            c.drawString(col3, y_dens, f"Diferencia Salida vs Final: {fmt_diff(dens_salida_avg, avg_d_f)}")
-            y_dens -= 10
+            if dens_salida_avg > 0:
+                # Solo comparar contra salidas si hay salidas cargadas
+                c.drawString(col3, y_dens, f"Diferencia Doc vs Salida: {fmt_diff(dens_ddt, dens_salida_avg)}")
+                y_dens -= 10
+                c.drawString(col3, y_dens, f"Diferencia Salida vs Inicial: {fmt_diff(dens_salida_avg, avg_d_i)}")
+                y_dens -= 10
+                c.drawString(col3, y_dens, f"Diferencia Salida vs Final: {fmt_diff(dens_salida_avg, avg_d_f)}")
+                y_dens -= 10
             c.drawString(col3, y_dens, f"Diferencia Doc vs Inicial: {fmt_diff(dens_ddt, avg_d_i)}")
             y_dens -= 10
             c.drawString(col3, y_dens, f"Diferencia Doc vs Final: {fmt_diff(dens_ddt, avg_d_f)}")
@@ -14201,7 +14211,8 @@ class PlanillaFinalApp:
         data["_tank_list"] = self.lista_tanques
         data["_carb_list"] = self.lista_carbonera
         data["_funcionarios"] = [{"cuil": f["cuil"].get(), "legajo": f["legajo"].get(), "apellido": f["apellido"].get(), "nombre": f["nombre"].get(), "funcion": f["funcion"].get()} for f in self.funcionarios_data]
-        with open("autosave.json", 'w') as f: json.dump(data, f)
+        # Anclado al directorio de la app (no al CWD desde donde se lanzó)
+        with open(_app_dir() / "autosave.json", 'w') as f: json.dump(data, f)
         self.root.after(30000, self.auto_save_loop)
     
     # ═══════════════════════════════════════════════════════════════════════
