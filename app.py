@@ -6937,14 +6937,32 @@ class PlanillaFinalApp:
             ddt_obj = next((d for d in self.ddt_data if d["numero"].get() == ddt_num), None)
             if not ddt_obj: continue
             try:
-                # Solo kilos — usar kv_lab/kv_doc/kv_sal pre-calculados
+                # Kilos vacío: para líquidos se calculan acá igual que la planilla
+                # (NETO = bruto − agua, × VCF × densidad según modo) para que el
+                # cargo/denuncia coincida exactamente con el PDF. Para otros tipos
+                # se usan los kv_* pre-calculados de la UI.
+                _tm_cp = self.get_tipo_medio()
+                _es_liq_cp = _tm_cp in ("BUQUE","BARCAZA","BUQUE QUIMIQUERO","DRAFT SURVEY",
+                                        "TANQUE FIJO","TANQUE FLOTANTE","CAMION CISTERNA")
+                dens_key_cp = "dens_lab" if modo_forzado == "laboratorio" else ("dens_salida" if modo_forzado == "salida" else "dens_doc")
                 kv_suffix = "kv_lab" if modo_forzado == "laboratorio" else ("kv_sal" if modo_forzado == "salida" else "kv_doc")
                 sum_kv_i = 0; sum_kv_f = 0
                 for tk_name in tanks:
                     for etapa in ["inicial", "final"]:
-                        raw_kv = self.get_var(f"{etapa}_{tk_name}_{kv_suffix}").get()
-                        try: val_kv = float(str(raw_kv).replace(",","")) if raw_kv and str(raw_kv).replace(".","").replace("-","").replace(",","").isdigit() else 0.0
-                        except: val_kv = 0.0
+                        if _es_liq_cp:
+                            d_raw = self.get_var(f"{etapa}_{tk_name}_{dens_key_cp}").get()
+                            if not d_raw: d_raw = self.get_var(f"{etapa}_{tk_name}_dens_lab").get()
+                            d_v = self.parse_float(d_raw)
+                            tbl_v = self.get_var(f"{etapa}_{tk_name}_tabla_vcf").get() or "54B (Combustibles)"
+                            t_v = self.parse_float(self.get_var(f"{etapa}_{tk_name}_temp").get())
+                            neto_v = self.interpolar_prod(etapa, tk_name) - self.interpolar_agua(etapa, tk_name)
+                            vcf_v = self.calc_vcf(d_v, t_v, tbl_v) if d_v > 0 else 1.0
+                            _dg = d_v / 1000.0 if d_v > 2.0 else d_v
+                            val_kv = neto_v * vcf_v * _dg if _dg > 0 else 0.0
+                        else:
+                            raw_kv = self.get_var(f"{etapa}_{tk_name}_{kv_suffix}").get()
+                            try: val_kv = float(str(raw_kv).replace(",","")) if raw_kv and str(raw_kv).replace(".","").replace("-","").replace(",","").isdigit() else 0.0
+                            except: val_kv = 0.0
                         if etapa == "inicial": sum_kv_i += val_kv
                         else:                  sum_kv_f += val_kv
                 dif_kv = sum_kv_i - sum_kv_f
@@ -7836,6 +7854,115 @@ class PlanillaFinalApp:
 
 
 
+    def crear_interp_trim_inline(self, etapa, tk_name, parent, start_row, agua=False):
+        """Sección embebida en la ficha del tanque para cargar la interpolación
+        × asiento (trim) sin abrir el diálogo aparte. Mismo formato y variable
+        que abrir_interp_trim_rapida ({etapa}_{tanque}_tabla_trim[_agua]_json).
+        Aplica y recalcula en vivo al tipear. Devuelve las filas de grilla usadas."""
+        import json
+        var_key = f"{etapa}_{tk_name}_tabla_trim{'_agua' if agua else ''}_json"
+        _hbg = "#117864" if agua else "#1A5276"
+        _titulo = "AGUA" if agua else "PRODUCTO"
+        _lit = "Lts.Agua" if agua else "Litros"
+        _bgl = "#D1F2EB" if agua else "#D6EAF8"
+        fb = ("Arial", 8, "bold")
+
+        # Prefill desde la tabla guardada (si es chica, igual que el diálogo rápido)
+        tA, tB = 0.0, 0.5
+        pre = [["", ""], ["", ""]]
+        pre_s = ["", ""]
+        existing = self.get_var(var_key).get()
+        if existing:
+            try:
+                obj0 = json.loads(existing)
+                tr0 = [float(t) for t in obj0.get("trims", [])]
+                rw0 = obj0.get("rows", [])
+                if len(tr0) >= 2: tA, tB = tr0[0], tr0[1]
+                for i in range(min(2, len(rw0))):
+                    pre_s[i] = f"{rw0[i][0]:g}"
+                    if len(rw0[i]) > 1 and rw0[i][1] is not None: pre[i][0] = f"{rw0[i][1]:g}"
+                    if len(rw0[i]) > 2 and rw0[i][2] is not None: pre[i][1] = f"{rw0[i][2]:g}"
+            except: pass
+
+        v_tA = tk.StringVar(value=f"{tA:g}"); v_tB = tk.StringVar(value=f"{tB:g}")
+        v_s = [tk.StringVar(value=pre_s[0]), tk.StringVar(value=pre_s[1])]
+        v_l = [[tk.StringVar(value=pre[0][0]), tk.StringVar(value=pre[0][1])],
+               [tk.StringVar(value=pre[1][0]), tk.StringVar(value=pre[1][1])]]
+        v_res = tk.StringVar(value="—")
+
+        r = start_row
+        tk.Label(parent, text=f"── INTERPOLACIÓN × ASIENTO ({_titulo}) — 2da fila opcional ──",
+                 font=fb, fg="white", bg=_hbg).grid(row=r, column=0, columnspan=8, pady=(8,2), sticky="ew")
+        tk.Button(parent, text="Tabla completa/CSV…", bg="#5D6D7E", fg="white", font=("Arial", 7),
+                  relief="flat", cursor="hand2",
+                  command=lambda: self.abrir_tabla_calibrado_trim(etapa, tk_name, agua=agua)
+                  ).grid(row=r, column=8, sticky="ew", padx=1, pady=(8, 2))
+        r += 1
+        _cols = [("Asiento A (m)", v_tA), ("Asiento B (m)", v_tB),
+                 ("Sondaje 1 (mm)", v_s[0]), (f"{_lit} 1 @A", v_l[0][0]), (f"{_lit} 1 @B", v_l[0][1]),
+                 ("Sondaje 2 (mm)", v_s[1]), (f"{_lit} 2 @A", v_l[1][0]), (f"{_lit} 2 @B", v_l[1][1])]
+        for ci, (lbl_t, _v) in enumerate(_cols):
+            tk.Label(parent, text=lbl_t, font=fb, bg=_bgl, anchor="w").grid(
+                row=r, column=ci, sticky="ew", padx=1, pady=(2, 0))
+            tk.Entry(parent, textvariable=_v, justify="center", bg="white").grid(
+                row=r + 1, column=ci, sticky="ew", padx=1)
+        tk.Label(parent, text="Vol. interp. (L)", font=fb, bg=_bgl, anchor="w").grid(
+            row=r, column=8, sticky="ew", padx=1, pady=(2, 0))
+        tk.Entry(parent, textvariable=v_res, justify="center", state="readonly",
+                 readonlybackground="#FEF9E7").grid(row=r + 1, column=8, sticky="ew", padx=1)
+
+        def _build_obj():
+            try:
+                ta = float(v_tA.get().strip().replace(",", "."))
+                tb = float(v_tB.get().strip().replace(",", "."))
+            except: return None
+            rows = []
+            for i in range(2):
+                s = v_s[i].get().strip().replace(",", ".")
+                la = v_l[i][0].get().strip().replace(",", ".")
+                lb = v_l[i][1].get().strip().replace(",", ".")
+                if not s: continue
+                try:
+                    rows.append([float(s),
+                                 float(la) if la else None,
+                                 float(lb) if lb else None])
+                except: pass
+            if not rows: return None
+            return {"trims": [ta, tb], "rows": rows}
+
+        def _recalc():
+            if agua: self.calc_volumen_agua_ui(etapa, tk_name)
+            else: self.calc_volumen_prod_ui(etapa, tk_name)
+
+        def _preview(obj):
+            _s_key = f"{etapa}_{tk_name}_agua_s_real" if agua else f"{etapa}_{tk_name}_s_corr"
+            s_act = self.parse_float(self.get_var(_s_key).get())
+            trim_act = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+            vol, _det = self._interp_trim_table(obj, s_act, trim_act)
+            v_res.set(f"{vol:,.0f}".replace(",", ".") if vol is not None else "—")
+
+        def _aplicar(*_a):
+            obj = _build_obj()
+            if obj is None:
+                v_res.set("—")
+                # Solo borrar la tabla guardada si el usuario vació los campos
+                _vacio = not any(vv.get().strip() for vv in v_s + v_l[0] + v_l[1])
+                if _vacio and self.get_var(var_key).get():
+                    self.get_var(var_key).set("")
+                    _recalc()
+                return
+            obj["rows"].sort(key=lambda rr: rr[0])
+            self.get_var(var_key).set(json.dumps(obj))
+            _recalc()
+            _preview(obj)
+
+        for vv in [v_tA, v_tB] + v_s + v_l[0] + v_l[1]:
+            vv.trace_add("write", _aplicar)
+        # Vista previa inicial sin tocar lo guardado
+        _obj_ini = _build_obj()
+        if _obj_ini: _preview(_obj_ini)
+        return 3
+
     def abrir_popup_detalle(self, etapa, tk_name):
         try:
             popup = tk.Toplevel(self.root)
@@ -7968,6 +8095,10 @@ class PlanillaFinalApp:
             # A partir de aquí usamos _cur_row dinámico
             # ═══════════════════════════════════════════════════════════════
             _cur_row = 6 if _show_uti else 2
+
+            # ── Interp × asiento (PRODUCTO) embebida — buques líquidos ─────
+            if _es_maritimo_liq:
+                _cur_row += self.crear_interp_trim_inline(etapa, tk_name, frame_main, _cur_row, agua=False)
 
             # ── Tierra / Camión cisterna ──────────────────────────────────
             if _tie or (_cam and not _cgb):
@@ -8441,6 +8572,10 @@ class PlanillaFinalApp:
                         ea.bind("<KeyRelease>", lambda ev,t=tk_name,ep=etapa: self.calc_volumen_agua_ui(ep,t))
                 _cur_row += 2
 
+                # ── Interp × asiento (AGUA) embebida — buques líquidos ─────
+                if _es_maritimo_liq:
+                    _cur_row += self.crear_interp_trim_inline(etapa, tk_name, frame_main, _cur_row, agua=True)
+
             # ══════════════════════════════════════════════════════════════
             # DENSIDADES / VOLÚMENES (solo para mediciones de producto líquido)
             # ══════════════════════════════════════════════════════════════
@@ -8673,12 +8808,16 @@ class PlanillaFinalApp:
             temp = self.parse_float(temp_str)
             table_type = self.get_var(f"{etapa}_{tanque}_tabla_vcf").get()
             if not table_type: table_type = "54B (Combustibles)"
+            # Litros a 15° y kilos sobre el volumen NETO (bruto − agua de fondo),
+            # igual que la planilla PDF (generar_un_reporte) y el cálculo de cargos.
+            agua_lts = self.parse_float(self.get_var(f"{etapa}_{tanque}_vol_nat_agua").get() or "0")
+            val_neto = val - agua_lts
             def calc_set(dens_key_suffix, out_v15, out_kv, out_ka):
                 d_str = self.get_var(f"{etapa}_{tanque}_{dens_key_suffix}").get()
                 if d_str:
                     dens = self.parse_float(d_str)
-                    vcf = self.calc_vcf(dens, temp, table_type) 
-                    vol_15 = val * vcf
+                    vcf = self.calc_vcf(dens, temp, table_type)
+                    vol_15 = val_neto * vcf
                     d_calc = dens
                     if d_calc > 2.0: d_calc = d_calc / 1000.0
                     kg_vacio = vol_15 * d_calc
@@ -8702,21 +8841,25 @@ class PlanillaFinalApp:
             s = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s_real").get())
             # ── Tabla × asiento para agua (buque/barcaza) — prioridad ──────
             trim_json = self.get_var(f"{etapa}_{tanque}_tabla_trim_agua_json").get()
+            handled = False
             if trim_json:
                 obj = json.loads(trim_json)
                 trim_m = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
                 vol_t, _det = self._interp_trim_table(obj, s, trim_m)
                 if vol_t is not None:
                     self.get_var(f"{etapa}_{tanque}_vol_nat_agua").set(f"{vol_t:.0f}")
-                    return
-            s1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s1").get())
-            l1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_l1").get())
-            s2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s2").get())
-            l2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_l2").get())
-            if s2 == s1: val = l1
-            else: val = l1 + ((s - s1) / (s2 - s1)) * (l2 - l1)
-            self.get_var(f"{etapa}_{tanque}_vol_nat_agua").set(f"{val:.0f}")
+                    handled = True
+            if not handled:
+                s1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s1").get())
+                l1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_l1").get())
+                s2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s2").get())
+                l2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_l2").get())
+                if s2 == s1: val = l1
+                else: val = l1 + ((s - s1) / (s2 - s1)) * (l2 - l1)
+                self.get_var(f"{etapa}_{tanque}_vol_nat_agua").set(f"{val:.0f}")
         except: self.get_var(f"{etapa}_{tanque}_vol_nat_agua").set("0")
+        # El agua afecta v15/kv/ka del producto → refrescar
+        self.calc_volumen_prod_ui(etapa, tanque)
 
     def interpolar_prod(self, etapa, tanque):
         self.calc_volumen_prod_ui(etapa, tanque)
@@ -12236,8 +12379,10 @@ class PlanillaFinalApp:
                     vcf_str = self.get_vcf_details(dens, temp, tbl)
                     agua_real = self.get_var(f"{etapa}_{tk_name}_agua_s_real").get() or "0"
                     agua_lts  = self.get_var(f"{etapa}_{tk_name}_vol_nat_agua").get() or "0"
+                    _neto_v = self.parse_float(vol_nat) - self.parse_float(agua_lts)
                     try:
-                        v15_val = float(vol_nat) * self.calc_vcf(dens, temp, tbl)
+                        # Vol.15°C y peso sobre el NETO (bruto − agua), igual que la planilla
+                        v15_val = _neto_v * self.calc_vcf(dens, temp, tbl)
                         _d_air = dens / 1000.0 if dens > 2.0 else dens
                         kg_air_val = v15_val * (_d_air - 0.0011) if _d_air > 0 else 0
                     except: v15_val = 0; kg_air_val = 0
@@ -12245,8 +12390,8 @@ class PlanillaFinalApp:
                         f"  UTI Nro: {num_uti}  |  Alt.Referencia: {alt_ref} mm",
                         f"  1. Sondaje UTI: {s_uti} mm  —  Desc.tubo: {desc} mm  →  Sondaje Corr.: {s_corr} mm",
                         f"  2. Interpolación tabla: {interp_str}  =  {vol_nat} Lts (bruto)",
-                        f"  3. Agua de fondo: {agua_real} mm  →  {agua_lts} Lts  |  Vol.Neto: {float(vol_nat or 0)-float(agua_lts or 0):,.0f} Lts",
-                        f"  4. VCF ({tbl}): {vcf_str}  |  Vol.15°C: {v15_val:,.0f} Lts",
+                        f"  3. Agua de fondo: {agua_real} mm  →  {agua_lts} Lts  |  Vol.Neto: {_neto_v:,.0f} Lts",
+                        f"  4. VCF ({tbl}): {vcf_str}  |  Vol.15°C: {_neto_v:,.0f}×VCF = {v15_val:,.0f} Lts",
                         f"  5. Dens.lab: {dens}  |  Temp: {temp}°C  |  Peso en aire: {v15_val:,.0f}×({dens}−0.0011) = {kg_air_val:,.0f} Kg",
                     ]
                     if self.get_var(f"{etapa}_{tk_name}_tabla_trim_agua_json").get():
@@ -12320,16 +12465,20 @@ class PlanillaFinalApp:
                     temp = self.parse_float(self.get_var(f"{etapa}_{tk_name}_temp").get() or "0")
                     tbl  = self.get_var(f"{etapa}_{tk_name}_tabla_vcf").get() or "54B"
                     vcf_str = self.get_vcf_details(dens, temp, tbl)
+                    _agua_t = self.parse_float(self.get_var(f"{etapa}_{tk_name}_vol_nat_agua").get() or "0")
+                    _neto_t = self.parse_float(vol_nat) - _agua_t
                     try:
-                        v15_val = float(vol_nat) * self.calc_vcf(dens, temp, tbl)
+                        # parse_float (no float()): vol_nat de tierra viene con coma de miles
+                        v15_val = _neto_t * self.calc_vcf(dens, temp, tbl)
                         _d_air = dens / 1000.0 if dens > 2.0 else dens
                         kg_air_val = v15_val * (_d_air - 0.0011) if _d_air > 0 else 0
                     except: v15_val = 0; kg_air_val = 0
                     lines_m = [
                         f"  1. Sondaje/Varilla: {s_tierra} mm  →  Corregido: {s_corr} mm",
                         f"  2. Interpolación: {interp_str}  =  {vol_nat} Lts",
-                        f"  3. VCF ({tbl}): {vcf_str}  |  Vol.15°C: {v15_val:,.0f} Lts",
-                        f"  4. Dens: {dens}  |  Temp: {temp}°C  |  Peso en aire: {kg_air_val:,.0f} Kg",
+                        f"  3. Agua: {_agua_t:,.0f} Lts  |  Vol.Neto: {_neto_t:,.0f} Lts",
+                        f"  4. VCF ({tbl}): {vcf_str}  |  Vol.15°C: {v15_val:,.0f} Lts",
+                        f"  5. Dens: {dens}  |  Temp: {temp}°C  |  Peso en aire: {kg_air_val:,.0f} Kg",
                     ]
 
                 # ── Tipo DUCTO ────────────────────────────────────────────────
