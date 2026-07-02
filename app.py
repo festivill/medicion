@@ -3143,9 +3143,18 @@ class PlanillaFinalApp:
             lbl_tk.grid(row=r, column=0, sticky="nsew")
             table_widgets.append(("name", lbl_tk))
             
-            # Boton Lapiz
-            btn_edit = tk.Button(f_table, text="Ed.", bg="#eee", font=("Arial", 10), command=lambda t=tk_name, e=etapa: self.abrir_popup_detalle(e, t))
-            btn_edit.grid(row=r, column=1, sticky="nsew", padx=1, pady=1)
+            # Boton Lapiz (+ Interp para buques: tabla calibrado × asiento)
+            f_btns = tk.Frame(f_table, bg="#eee")
+            f_btns.grid(row=r, column=1, sticky="nsew", padx=1, pady=1)
+            btn_edit = tk.Button(f_btns, text="Ed.", bg="#eee", font=("Arial", 10), command=lambda t=tk_name, e=etapa: self.abrir_popup_detalle(e, t))
+            btn_edit.pack(side="left", fill="both", expand=True)
+            if _is_mar_t:
+                btn_trim = tk.Button(f_btns, text="Interp", bg="#1A5276", fg="white",
+                                     font=("Arial", 7, "bold"), cursor="hand2",
+                                     command=lambda t=tk_name, e=etapa: self.abrir_interp_trim_rapida(e, t))
+                btn_trim.pack(side="left", fill="both", expand=True)
+                table_widgets.append(("btn", btn_trim))
+            table_widgets.append(("btn", f_btns))
             table_widgets.append(("btn", btn_edit))
 
             # Campos Resumen — DINÁMICOS según tipo (deben coincidir EXACTAMENTE con los headers)
@@ -7413,6 +7422,142 @@ class PlanillaFinalApp:
         except Exception as ex:
             return None, f"error: {ex}"
 
+    def abrir_interp_trim_rapida(self, etapa, tk_name):
+        """Carga manual rápida para interpolar por asiento (trim) en buques.
+        El usuario lee de la tabla de calibrado impresa los dos sondajes que
+        rodean su medición y los litros en las dos páginas de asiento que
+        rodean el asiento real (p.ej. 0 y 0.5). Interpola en 2D y guarda en
+        {etapa}_{tanque}_tabla_trim_json (mismo formato que el editor completo)."""
+        import json
+        top = tk.Toplevel(self.root)
+        top.title(f"Interpolación × Asiento — {tk_name} ({etapa.upper()})")
+        top.geometry("640x470")
+        top.resizable(False, False)
+        var_key = f"{etapa}_{tk_name}_tabla_trim_json"
+
+        s_act = self.parse_float(self.get_var(f"{etapa}_{tk_name}_s_corr").get())
+        trim_act = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+
+        fh = tk.Frame(top, bg="#1A5276", height=46)
+        fh.pack(fill="x"); fh.pack_propagate(False)
+        tk.Label(fh, text=f"INTERPOLACIÓN × ASIENTO  |  {tk_name}  |  {etapa.upper()}",
+                 bg="#1A5276", fg="white", font=("Arial",10,"bold")).pack(side="left", padx=14, pady=10)
+        tk.Label(fh, text=f"Sondaje: {s_act:.0f} mm   Asiento: {trim_act:+.2f} m",
+                 bg="#1A5276", fg="#AED6F1", font=("Arial",9,"bold")).pack(side="right", padx=12)
+
+        tk.Label(top, text="Cargá los 2 sondajes de la tabla que rodean tu medición, y los litros "
+                           "de cada uno en las 2 páginas de asiento que rodean el asiento real del buque.",
+                 bg="#EBF5FB", fg="#1A5276", font=("Arial",8), anchor="w", wraplength=610,
+                 justify="left").pack(fill="x", padx=0, pady=(0,4), ipadx=10, ipady=4)
+
+        # Prefill desde tabla guardada (si es chica) o valores por defecto
+        tA, tB = 0.0, 0.5
+        pre = [["",""],["",""]]   # [fila][col] litros
+        pre_s = ["",""]
+        existing = self.get_var(var_key).get()
+        if existing:
+            try:
+                obj0 = json.loads(existing)
+                tr0 = [float(t) for t in obj0.get("trims", [])]
+                rw0 = obj0.get("rows", [])
+                if len(tr0) >= 2: tA, tB = tr0[0], tr0[1]
+                for i in range(min(2, len(rw0))):
+                    pre_s[i] = f"{rw0[i][0]:g}"
+                    if len(rw0[i]) > 1 and rw0[i][1] is not None: pre[i][0] = f"{rw0[i][1]:g}"
+                    if len(rw0[i]) > 2 and rw0[i][2] is not None: pre[i][1] = f"{rw0[i][2]:g}"
+            except: pass
+
+        f_g = tk.Frame(top, bg="white", padx=14, pady=8); f_g.pack(fill="both", expand=True)
+        v_tA = tk.StringVar(value=f"{tA:g}"); v_tB = tk.StringVar(value=f"{tB:g}")
+        v_s  = [tk.StringVar(value=pre_s[0]), tk.StringVar(value=pre_s[1])]
+        v_l  = [[tk.StringVar(value=pre[0][0]), tk.StringVar(value=pre[0][1])],
+                [tk.StringVar(value=pre[1][0]), tk.StringVar(value=pre[1][1])]]
+
+        fbh = ("Arial", 9, "bold")
+        tk.Label(f_g, text="", bg="white").grid(row=0, column=0)
+        tk.Label(f_g, text="ASIENTO A (m)", bg="#D6EAF8", font=fbh, width=16).grid(row=0, column=1, padx=3, pady=3, sticky="ew")
+        tk.Label(f_g, text="ASIENTO B (m)", bg="#D6EAF8", font=fbh, width=16).grid(row=0, column=2, padx=3, pady=3, sticky="ew")
+        tk.Label(f_g, text="Asiento →", bg="white", font=fbh, anchor="e").grid(row=1, column=0, sticky="e", padx=3)
+        e_tA = tk.Entry(f_g, textvariable=v_tA, justify="center", font=("Arial",11,"bold"), bg="#EBF5FB", width=14)
+        e_tA.grid(row=1, column=1, padx=3, pady=2, ipady=3)
+        e_tB = tk.Entry(f_g, textvariable=v_tB, justify="center", font=("Arial",11,"bold"), bg="#EBF5FB", width=14)
+        e_tB.grid(row=1, column=2, padx=3, pady=2, ipady=3)
+
+        tk.Label(f_g, text="SONDAJE (mm)", bg="#D5DBDB", font=fbh).grid(row=2, column=0, padx=3, pady=(10,3), sticky="ew")
+        tk.Label(f_g, text="LITROS @ A", bg="#D6EAF8", font=fbh).grid(row=2, column=1, padx=3, pady=(10,3), sticky="ew")
+        tk.Label(f_g, text="LITROS @ B", bg="#D6EAF8", font=fbh).grid(row=2, column=2, padx=3, pady=(10,3), sticky="ew")
+
+        entries = []
+        for i in range(2):
+            e_s = tk.Entry(f_g, textvariable=v_s[i], justify="center", font=("Arial",12), bg="#FDFEFE", width=14)
+            e_s.grid(row=3+i, column=0, padx=3, pady=3, ipady=4)
+            e_a = tk.Entry(f_g, textvariable=v_l[i][0], justify="center", font=("Arial",12), bg="#F4FAFF", width=14)
+            e_a.grid(row=3+i, column=1, padx=3, pady=3, ipady=4)
+            e_b = tk.Entry(f_g, textvariable=v_l[i][1], justify="center", font=("Arial",12), bg="#F4FAFF", width=14)
+            e_b.grid(row=3+i, column=2, padx=3, pady=3, ipady=4)
+            entries += [e_s, e_a, e_b]
+
+        lbl_res = tk.Label(f_g, text="—", bg="#FEF9E7", fg="#7D6608",
+                           font=("Arial",11,"bold"), relief="groove", pady=8)
+        lbl_res.grid(row=5, column=0, columnspan=3, sticky="ew", padx=3, pady=(14,4))
+        lbl_det = tk.Label(f_g, text="", bg="white", fg="#616A6B", font=("Arial",8), wraplength=580, justify="left")
+        lbl_det.grid(row=6, column=0, columnspan=3, sticky="ew", padx=3)
+
+        def _build_obj():
+            try:
+                ta = float(v_tA.get().strip().replace(",","."))
+                tb = float(v_tB.get().strip().replace(",","."))
+            except: return None
+            rows = []
+            for i in range(2):
+                s = v_s[i].get().strip().replace(",",".")
+                la = v_l[i][0].get().strip().replace(",",".")
+                lb = v_l[i][1].get().strip().replace(",",".")
+                if not s: continue
+                try:
+                    rows.append([float(s),
+                                 float(la) if la else None,
+                                 float(lb) if lb else None])
+                except: pass
+            if not rows: return None
+            return {"trims": [ta, tb], "rows": rows}
+
+        def _preview(*_a):
+            obj = _build_obj()
+            if not obj:
+                lbl_res.config(text="—"); lbl_det.config(text=""); return
+            vol, det = self._interp_trim_table(obj, s_act, trim_act)
+            if vol is None:
+                lbl_res.config(text="Faltan datos"); lbl_det.config(text=str(det)); return
+            lbl_res.config(text=f"VOLUMEN INTERPOLADO:  {vol:,.0f} L".replace(",","."))
+            lbl_det.config(text=det)
+
+        for e in entries + [e_tA, e_tB]:
+            e.bind("<KeyRelease>", _preview)
+        _preview()
+
+        f_foot = tk.Frame(top, bg="#154360", height=48)
+        f_foot.pack(fill="x", side="bottom"); f_foot.pack_propagate(False)
+
+        def _guardar():
+            obj = _build_obj()
+            if not obj:
+                self.get_var(var_key).set("")
+            else:
+                obj["rows"].sort(key=lambda r: r[0])
+                self.get_var(var_key).set(json.dumps(obj))
+            top.destroy()
+            self.calc_volumen_prod_ui(etapa, tk_name)
+
+        tk.Button(f_foot, text="  [OK] GUARDAR Y APLICAR  ", bg="#27AE60", fg="white",
+                  font=("Arial",9,"bold"), relief="flat", cursor="hand2",
+                  command=_guardar).pack(side="left", padx=14, pady=8, ipadx=10, ipady=4)
+        tk.Button(f_foot, text="Tabla completa / CSV…", bg="#5D6D7E", fg="white", font=("Arial",8), relief="flat",
+                  command=lambda: (top.destroy(), self.abrir_tabla_calibrado_trim(etapa, tk_name))
+                  ).pack(side="left", padx=6, pady=8, ipadx=6, ipady=3)
+        tk.Button(f_foot, text="Cancelar", bg="#7F8C8D", fg="white", font=("Arial",8), relief="flat",
+                  command=top.destroy).pack(side="right", padx=10, pady=8, ipadx=6, ipady=3)
+
     def abrir_tabla_calibrado_trim(self, etapa, tk_name, label_col2="LITROS"):
         """Editor de tabla de calibrado con múltiples columnas de asiento (trim) para
         buques/barcazas. Cada sondaje tiene un volumen por cada asiento (p.ej. 0, 0.5,
@@ -8318,9 +8463,9 @@ class PlanillaFinalApp:
                           command=lambda: self.abrir_tabla_calibrado(etapa, tk_name, es_buque=_mar)
                           ).pack(side="left", padx=8, pady=8, ipadx=8, ipady=4)
             if _mar:
-                tk.Button(f_bot_fixed, text="  Calibrado × Trim  ", bg="#1A5276", fg="white",
+                tk.Button(f_bot_fixed, text="  Interp × Asiento  ", bg="#1A5276", fg="white",
                           font=fb, relief="flat", cursor="hand2",
-                          command=lambda: self.abrir_tabla_calibrado_trim(etapa, tk_name)
+                          command=lambda: self.abrir_interp_trim_rapida(etapa, tk_name)
                           ).pack(side="left", padx=8, pady=8, ipadx=8, ipady=4)
             tk.Label(f_bot_fixed, text=f"{tk_name}  |  {etapa.upper()}",
                      bg="#2C3E50", fg="#AED6F1", font=("Arial",9)).pack(side="right", padx=12)
