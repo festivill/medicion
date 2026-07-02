@@ -2345,7 +2345,11 @@ class PdfReportsMixin:
             agua_mm = self.parse_float(self.get_var(f"{etapa}_{nombre}_agua_s_real").get())
             vol_str = self.get_var(f"{etapa}_{nombre}_vol_nat_prod").get()
             prod    = self.get_var(f"{etapa}_{nombre}_prod_name").get()
-            pct   = max(0.0, min(1.0, s_corr / alt_ref)) if alt_ref > 0 else 0.0
+            # El sondaje UTI es ullage (vacío desde la referencia): a más sondaje,
+            # menos líquido. El % de llenado es el complemento. Un tanque sin
+            # producto cargado (vol 0) queda en 0%, no en 100%.
+            _vol_val = self.parse_float(vol_str)
+            pct   = max(0.0, min(1.0, (alt_ref - s_corr) / alt_ref)) if (alt_ref > 0 and _vol_val > 0) else 0.0
             pagua = max(0.0, min(pct, agua_mm / alt_ref)) if alt_ref > 0 else 0.0
             th = top_t - bot_t
             c.setFillColor(colors.HexColor("#FDFEFE")); c.setStrokeColor(colors.HexColor("#4D5656"))
@@ -2488,8 +2492,8 @@ class PdfReportsMixin:
             c.rect(ax0 + 5, by, aw - 10, 6, fill=1, stroke=1)
             c.setFillColor(colors.HexColor("#2E4053"))
             c.rect(ax0 + 6.2, by + 1.8, aw - 12.4, 2.8, fill=1, stroke=0)
-            # chimenea
-            fx = ax0 + aw - 10
+            # chimenea (a la izquierda de la superestructura)
+            fx = ax0 + 4
             c.setFillColor(AZUL); c.setStrokeColor(CASCO_B); c.setLineWidth(0.5)
             p_fun = c.beginPath()
             p_fun.moveTo(fx, deck_y + nh * 1.6); p_fun.lineTo(fx + 8.5, deck_y + nh * 1.6)
@@ -2498,8 +2502,8 @@ class PdfReportsMixin:
             c.drawPath(p_fun, fill=1, stroke=1)
             c.setFillColor(colors.white)
             c.rect(fx + 1.9, by + 5.4, 4.8, 2.2, fill=1, stroke=0)
-            # mástil radar + luz
-            mx = ax0 + 13
+            # mástil radar + luz (a la derecha de la superestructura)
+            mx = ax0 + aw - 13
             c.setStrokeColor(colors.HexColor("#424949")); c.setLineWidth(0.7)
             c.line(mx, by + 6, mx, by + 13)
             c.line(mx - 3.5, by + 10.5, mx + 3.5, by + 10.5)
