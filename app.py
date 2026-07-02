@@ -405,6 +405,42 @@ class PlanillaFinalApp:
         if key not in self.vars: self.vars[key] = tk.StringVar(value=default)
         return self.vars[key]
 
+    # Actores propios de cada declaración detallada (con su CUIT)
+    DDT_ACTOR_KEYS = ("despachante", "cuit_desp", "impexp", "cuit_impexp", "ata", "cuit_ata")
+    # Mapeo actor del DDT → campo global de la carátula (fallback)
+    DDT_ACTOR_GLOBAL = {
+        "despachante": "car_despachante", "cuit_desp": "car_cuit_desp",
+        "impexp": "car_impexp", "cuit_impexp": "car_cuit_impexp",
+        "ata": "car_ata", "cuit_ata": "car_cuit_ata",
+    }
+
+    def _ddt_actor(self, ddt_obj, key):
+        """Actor (despachante/imex/ATA o CUIT) del documento; si el documento
+        no lo tiene cargado, cae a la carátula global."""
+        v = ""
+        try:
+            sv = ddt_obj.get(key) if ddt_obj else None
+            v = sv.get().strip() if isinstance(sv, tk.StringVar) else str(sv or "").strip()
+        except: pass
+        return v or self.get_var(self.DDT_ACTOR_GLOBAL[key]).get()
+
+    def _actores_pdf(self, ddt_obj=None):
+        """Actores a imprimir en un PDF. Con ddt_obj: los de ese documento
+        (fallback carátula). Sin ddt_obj (reporte general): los valores
+        distintos entre todos los documentos, unidos con ' / '."""
+        res = {}
+        for k in self.DDT_ACTOR_KEYS:
+            if ddt_obj is not None:
+                res[k] = self._ddt_actor(ddt_obj, k)
+            else:
+                vistos = []
+                for d in self.ddt_data:
+                    sv = d.get(k)
+                    val = sv.get().strip() if isinstance(sv, tk.StringVar) else ""
+                    if val and val not in vistos: vistos.append(val)
+                res[k] = " / ".join(vistos) if vistos else self.get_var(self.DDT_ACTOR_GLOBAL[k]).get()
+        return res
+
     def parse_float(self, value):
         if not value: return 0.0
         if isinstance(value, (int, float)): return float(value)
@@ -1973,6 +2009,19 @@ class PlanillaFinalApp:
             "tipo_cambio": tk.StringVar(value=data["tipo_cambio"] if data and "tipo_cambio" in data else ""),
             "salidas": [], "main_frame": None, "salidas_frame": None
         }
+        # ── Actores del documento (cada detallada puede tener su propio
+        #    despachante / importador-exportador / ATA). Al agregar un doc
+        #    nuevo se precargan desde el primer documento que los tenga. ──
+        def _actor_ini(k):
+            if data is not None:
+                return data.get(k, "")
+            for d_prev in self.ddt_data:
+                v_prev = d_prev.get(k)
+                if isinstance(v_prev, tk.StringVar) and v_prev.get().strip():
+                    return v_prev.get()
+            return ""
+        for _ak in self.DDT_ACTOR_KEYS:
+            obj[_ak] = tk.StringVar(value=_actor_ini(_ak))
         obj["litros"].trace_add("write", lambda *args: self.auto_calc_densidad(obj["litros"], obj["kilos"], obj["densidad"]))
         obj["kilos"].trace_add("write", lambda *args: self.auto_calc_densidad(obj["litros"], obj["kilos"], obj["densidad"]))
 
@@ -2030,6 +2079,35 @@ class PlanillaFinalApp:
                 e_divisa_desc.grid_remove()
         obj["divisa"].trace_add("write", toggle_divisa_desc)
         toggle_divisa_desc()
+        # ROW 3-4: Actores del documento (despachante / imp-exp / ATA + CUITs)
+        _fga = ("Arial", 8, "bold")
+        tk.Label(f_header, text="Despachante:", font=_fga, fg="#1B4F72").grid(row=3, column=0, sticky="e", padx=2, pady=(8, 0))
+        ttk.Entry(f_header, textvariable=obj["despachante"], width=28).grid(row=3, column=1, sticky="ew", padx=3, pady=(8, 0))
+        tk.Label(f_header, text="CUIT:", font=_fga, fg="#1B4F72").grid(row=3, column=2, sticky="e", padx=2, pady=(8, 0))
+        e_cd = tk.Entry(f_header, textvariable=obj["cuit_desp"], width=14)
+        e_cd.grid(row=3, column=3, sticky="w", padx=3, pady=(8, 0))
+        tk.Label(f_header, text="Imp/Exp:", font=_fga, fg="#1B4F72").grid(row=3, column=4, sticky="e", padx=2, pady=(8, 0))
+        ttk.Entry(f_header, textvariable=obj["impexp"], width=24).grid(row=3, column=5, columnspan=2, sticky="ew", padx=3, pady=(8, 0))
+        tk.Label(f_header, text="CUIT:", font=_fga, fg="#1B4F72").grid(row=3, column=7, sticky="e", padx=2, pady=(8, 0))
+        e_ci = tk.Entry(f_header, textvariable=obj["cuit_impexp"], width=14)
+        e_ci.grid(row=3, column=8, columnspan=2, sticky="w", padx=3, pady=(8, 0))
+        tk.Label(f_header, text="ATA:", font=_fga, fg="#1B4F72").grid(row=4, column=0, sticky="e", padx=2, pady=(2, 4))
+        ttk.Entry(f_header, textvariable=obj["ata"], width=28).grid(row=4, column=1, sticky="ew", padx=3, pady=(2, 4))
+        tk.Label(f_header, text="CUIT:", font=_fga, fg="#1B4F72").grid(row=4, column=2, sticky="e", padx=2, pady=(2, 4))
+        e_ca = tk.Entry(f_header, textvariable=obj["cuit_ata"], width=14)
+        e_ca.grid(row=4, column=3, sticky="w", padx=3, pady=(2, 4))
+        for _ew, _ev in ((e_cd, obj["cuit_desp"]), (e_ci, obj["cuit_impexp"]), (e_ca, obj["cuit_ata"])):
+            _ew.bind("<FocusOut>", lambda ev, wdg=_ew, v=_ev: self.on_cuit_validate(wdg, v))
+        def _copiar_actores(o=obj):
+            src = next((d for d in self.ddt_data if d is not o and any(
+                isinstance(d.get(k), tk.StringVar) and d.get(k).get().strip()
+                for k in self.DDT_ACTOR_KEYS)), None)
+            if not src: return
+            for k in self.DDT_ACTOR_KEYS:
+                sv = src.get(k)
+                if isinstance(sv, tk.StringVar): o[k].set(sv.get())
+        tk.Button(f_header, text="⧉ Copiar del 1er doc", bg="#5D6D7E", fg="white", font=("Arial", 8),
+                  command=_copiar_actores).grid(row=4, column=4, columnspan=3, sticky="w", padx=3, pady=(2, 4))
         # T/C now in row=1 cols 10-11 above
         f_sub = ttk.Frame(frame)
         f_sub.pack(fill="x", padx=20, pady=5)
@@ -12711,9 +12789,12 @@ class PlanillaFinalApp:
         y_header_start = h - 90
         col1 = 53; col2 = 335; col3 = 595 
         c.setFont("Helvetica", 8)
+        # Actores: del documento si es reporte parcial; si es general, los de
+        # todos los documentos (distintos, unidos con ' / '), fallback carátula
+        _act = self._actores_pdf(ddt_obj if is_partial else None)
         c.drawString(col1, y_header_start,    f"Buque: {self.get_var('car_buque').get()} (IMO: {self.get_var('car_imo').get()})")
-        c.drawString(col1, y_header_start-12, f"Despachante: {self.get_var('car_despachante').get()} ({self.get_var('car_cuit_desp').get()})")
-        c.drawString(col1, y_header_start-24, f"Importador/Exportador: {self.get_var('car_impexp').get()} ({self.get_var('car_cuit_impexp').get()})")
+        c.drawString(col1, y_header_start-12, f"Despachante: {_act['despachante']} ({_act['cuit_desp']})")
+        c.drawString(col1, y_header_start-24, f"Importador/Exportador: {_act['impexp']} ({_act['cuit_impexp']})")
         c.drawString(col1, y_header_start-36, f"MANI: {self.get_var('car_mani').get()}")
         aduana_cod  = self.aduana_codigo()
         aduana_nom  = self.aduana_nombre()
@@ -12724,7 +12805,7 @@ class PlanillaFinalApp:
         if lugar_op_val:
             c.drawString(col1, y_header_start-72, f"Lugar Op.: {lugar_op_val}")
         c.drawString(col2, y_header_start,    aduana_str)
-        c.drawString(col2, y_header_start-12, f"ATA: {self.get_var('car_ata').get()} ({self.get_var('car_cuit_ata').get()})")
+        c.drawString(col2, y_header_start-12, f"ATA: {_act['ata']} ({_act['cuit_ata']})")
         c.drawString(col2, y_header_start-24, f"Viaje: {self.get_var('car_conocimientos').get()}")
         c.drawString(col2, y_header_start-36, f"Producto: {txt_prod}")
         current_y = y_header_start - 84  # shifted down for Lugar Op line
@@ -13148,7 +13229,7 @@ class PlanillaFinalApp:
 
         aduana    = self.aduana_nombre()
         buque     = self.get_var('car_buque').get()
-        operador  = self.get_var('car_impexp').get()
+        operador  = self._ddt_actor(ddt_obj, "impexp")
         dest_num  = ddt_obj["numero"].get()
         producto  = ddt_obj["producto"].get()
         doc_k     = self.parse_float(ddt_obj["kilos"].get())
@@ -13508,10 +13589,10 @@ class PlanillaFinalApp:
         
         aduana = self.aduana_nombre()
         buque = self.get_var('car_buque').get() or self.get_var('car_patente').get() or "S/I"
-        operador = self.get_var('car_impexp').get()
-        cuit_op = self.get_var('car_cuit_impexp').get()
-        ata = self.get_var('car_ata').get()
-        cuit_ata = self.get_var('car_cuit_ata').get()
+        operador = self._ddt_actor(ddt_obj, "impexp")
+        cuit_op = self._ddt_actor(ddt_obj, "cuit_impexp")
+        ata = self._ddt_actor(ddt_obj, "ata")
+        cuit_ata = self._ddt_actor(ddt_obj, "cuit_ata")
         fecha_med = self.get_var('final_Fecha').get() or self.get_var('inicial_Fecha').get()
         
         _vl_var2 = ddt_obj.get("valor_litro")
@@ -14098,6 +14179,8 @@ class PlanillaFinalApp:
                 "tipo_cambio": d["tipo_cambio"].get() if "tipo_cambio" in d else "",
                 "salidas": []
             }
+            for _ak in self.DDT_ACTOR_KEYS:
+                c_d[_ak] = d[_ak].get() if _ak in d else ""
             for s in d["salidas"]:
                 c_d["salidas"].append({
                     "numero": s["numero"].get(),
@@ -14136,6 +14219,8 @@ class PlanillaFinalApp:
                     "tipo_cambio": d["tipo_cambio"].get() if "tipo_cambio" in d else "",
                     "salidas": []
                 }
+                for _ak in self.DDT_ACTOR_KEYS:
+                    c_d[_ak] = d[_ak].get() if _ak in d else ""
                 for s in d["salidas"]:
                     c_d["salidas"].append({
                         "numero": s["numero"].get(),
