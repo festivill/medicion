@@ -3143,23 +3143,11 @@ class PlanillaFinalApp:
             lbl_tk.grid(row=r, column=0, sticky="nsew")
             table_widgets.append(("name", lbl_tk))
             
-            # Boton Lapiz (+ Interp para buques: tabla calibrado × asiento)
+            # Boton Lapiz (la interp × asiento se carga desde la ficha del tanque)
             f_btns = tk.Frame(f_table, bg="#eee")
             f_btns.grid(row=r, column=1, sticky="nsew", padx=1, pady=1)
             btn_edit = tk.Button(f_btns, text="Ed.", bg="#eee", font=("Arial", 10), command=lambda t=tk_name, e=etapa: self.abrir_popup_detalle(e, t))
             btn_edit.pack(side="left", fill="both", expand=True)
-            if _is_mar_t:
-                btn_trim = tk.Button(f_btns, text="Interp", bg="#1A5276", fg="white",
-                                     font=("Arial", 7, "bold"), cursor="hand2",
-                                     command=lambda t=tk_name, e=etapa: self.abrir_interp_trim_rapida(e, t))
-                btn_trim.pack(side="left", fill="both", expand=True)
-                table_widgets.append(("btn", btn_trim))
-                if _show_agua_col:
-                    btn_trim_ag = tk.Button(f_btns, text="Ag.", bg="#117864", fg="white",
-                                            font=("Arial", 7, "bold"), cursor="hand2",
-                                            command=lambda t=tk_name, e=etapa: self.abrir_interp_trim_rapida(e, t, agua=True))
-                    btn_trim_ag.pack(side="left", fill="both", expand=True)
-                    table_widgets.append(("btn", btn_trim_ag))
             table_widgets.append(("btn", f_btns))
             table_widgets.append(("btn", btn_edit))
 
