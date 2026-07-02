@@ -7200,28 +7200,6 @@ class PlanillaFinalApp:
                      fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
         tk.Label(hdr, text="Quitar", width=6, bg="#4A235A", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
 
-
-        f_tbl = tk.Frame(top, bg="white")
-        f_tbl.pack(fill="both", expand=True, padx=10, pady=6)
-        canvas_t = tk.Canvas(f_tbl, bg="white", highlightthickness=0)
-        sb_t = ttk.Scrollbar(f_tbl, orient="vertical", command=canvas_t.yview)
-        scroll_inner = tk.Frame(canvas_t, bg="white")
-        scroll_inner.bind("<Configure>", lambda e: canvas_t.configure(scrollregion=canvas_t.bbox("all")))
-        win_id = canvas_t.create_window((0,0), window=scroll_inner, anchor="nw")
-        canvas_t.bind("<Configure>", lambda e: canvas_t.itemconfig(win_id, width=e.width))
-        canvas_t.configure(yscrollcommand=sb_t.set)
-        sb_t.pack(side="right", fill="y"); canvas_t.pack(fill="both", expand=True)
-        canvas_t.bind("<MouseWheel>", lambda e: canvas_t.yview_scroll(int(-1*(e.delta/120)) if e.delta else (1 if e.num==5 else -1), "units"))
-        canvas_t.bind("<Button-4>", lambda e: canvas_t.yview_scroll(-1,"units"))
-        canvas_t.bind("<Button-5>", lambda e: canvas_t.yview_scroll(1,"units"))
-
-        hdr = tk.Frame(scroll_inner, bg="#4A235A")
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="#", width=5, bg="#4A235A", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2, pady=3)
-        tk.Label(hdr, text="SONDAJE (mm)", width=18, bg="#4A235A", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
-        tk.Label(hdr, text=label_col2, width=18, bg="#4A235A", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
-        tk.Label(hdr, text="Quitar", width=6, bg="#4A235A", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
-
         rows_data = []
 
         def _update_count():
@@ -7388,6 +7366,313 @@ class PlanillaFinalApp:
                   command=top.destroy).pack(side="right", padx=8, pady=8, ipadx=6, ipady=3)
         tk.Label(f_foot, text="Ordenar antes de guardar para mejor interpolacion",
                  bg="#2C3E50", fg="#AED6F1", font=("Arial",7)).pack(side="right", padx=12)
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Interpolación bilineal por sondaje × asiento (trim) — buques/barcazas
+    # ══════════════════════════════════════════════════════════════════════
+    def _interp_1d(self, pts, x):
+        """Interpola linealmente en una lista [(x0,y0),(x1,y1),...] (clamp en los extremos).
+        Devuelve None si no hay puntos usables."""
+        pts = [(float(a), float(b)) for a, b in pts if a is not None and b is not None]
+        if not pts: return None
+        pts.sort(key=lambda p: p[0])
+        if len(pts) == 1: return pts[0][1]
+        if x <= pts[0][0]:  return pts[0][1]
+        if x >= pts[-1][0]: return pts[-1][1]
+        for k in range(len(pts) - 1):
+            x0, y0 = pts[k]; x1, y1 = pts[k+1]
+            if x0 <= x <= x1:
+                if x1 == x0: return y0
+                return y0 + (x - x0) / (x1 - x0) * (y1 - y0)
+        return pts[-1][1]
+
+    def _interp_trim_table(self, obj, s, trim):
+        """Interpolación bilineal en una tabla multi-asiento.
+        obj = {"trims":[t0,t1,...], "rows":[[sondaje, v_t0, v_t1, ...], ...]}
+        1) Para cada columna de asiento interpola volumen vs sondaje en 's'.
+        2) Interpola esos volúmenes entre columnas según el 'trim' real (popa-proa).
+        Devuelve (volumen, detalle_str) o (None, motivo)."""
+        try:
+            trims = [float(t) for t in obj.get("trims", [])]
+            rows = [r for r in obj.get("rows", []) if r and r[0] is not None]
+            if not trims or len(rows) < 1:
+                return None, "tabla trim vacía"
+            col_vols = []
+            for c in range(len(trims)):
+                pts = [(r[0], r[c+1]) for r in rows if len(r) > c+1 and r[c+1] is not None]
+                v = self._interp_1d(pts, s)
+                if v is not None:
+                    col_vols.append((trims[c], v))
+            if not col_vols:
+                return None, "sin volúmenes por columna"
+            vol = self._interp_1d(col_vols, trim)
+            det = (f"Sondaje {s:.0f}mm, asiento {trim:+.2f}m → "
+                   + " | ".join(f"t{tc:g}:{vc:.0f}" for tc, vc in col_vols)
+                   + f" ⇒ {vol:.0f}")
+            return vol, det
+        except Exception as ex:
+            return None, f"error: {ex}"
+
+    def abrir_tabla_calibrado_trim(self, etapa, tk_name, label_col2="LITROS"):
+        """Editor de tabla de calibrado con múltiples columnas de asiento (trim) para
+        buques/barcazas. Cada sondaje tiene un volumen por cada asiento (p.ej. 0, 0.5,
+        1.0, 1.5 m de diferencia popa-proa). El volumen final se interpola en 2D
+        (sondaje × asiento real). Se guarda en {etapa}_{tanque}_tabla_trim_json."""
+        import json, csv as csv_mod
+        top = tk.Toplevel(self.root)
+        top.title(f"Calibrado × Asiento (Trim) — {tk_name} ({etapa.upper()})")
+        top.geometry("1040x660")
+        top.resizable(True, True)
+        var_key = f"{etapa}_{tk_name}_tabla_trim_json"
+
+        fh = tk.Frame(top, bg="#1A5276", height=50)
+        fh.pack(fill="x"); fh.pack_propagate(False)
+        tk.Label(fh, text=f"CALIBRADO × ASIENTO  |  {tk_name}  |  {etapa.upper()}",
+                 bg="#1A5276", fg="white", font=("Arial",10,"bold")).pack(side="left", padx=16, pady=12)
+        tk.Label(fh, text=f"Col.2+: {label_col2} por asiento (m)", bg="#1A5276", fg="#AED6F1",
+                 font=("Arial",8)).pack(side="right", padx=12)
+
+        f_info = tk.Frame(top, bg="#EBF5FB"); f_info.pack(fill="x")
+        tk.Label(f_info,
+                 text="BUQUE / BARCAZA — La tabla de sondaje trae un volumen por cada 'asiento' (diferencia popa-proa, en metros). "
+                      "Cargá una columna por cada asiento de tu tabla (típico: 0, 0.5, 1.0, 1.5). El programa interpola el volumen "
+                      "según el sondaje corregido y el asiento (Trimación = Calado Popa − Calado Proa) real de la medición.",
+                 bg="#EBF5FB", fg="#1A5276", font=("Arial",7), anchor="w",
+                 wraplength=1000, justify="left").pack(fill="x", padx=10, pady=4)
+
+        # ── Configuración de columnas de asiento ───────────────────────────
+        f_cols = tk.Frame(top, bg="#D6EAF8", pady=4); f_cols.pack(fill="x")
+        tk.Label(f_cols, text="Asientos (m), separados por coma:", bg="#D6EAF8",
+                 font=("Arial",8,"bold"), fg="#1A5276").pack(side="left", padx=(12,4))
+        var_trims = tk.StringVar(value="0, 0.5, 1.0, 1.5")
+        e_trims = tk.Entry(f_cols, textvariable=var_trims, width=30, font=("Arial",9), justify="center")
+        e_trims.pack(side="left", padx=4)
+        tk.Button(f_cols, text="Aplicar columnas", bg="#2874A6", fg="white", font=("Arial",8,"bold"),
+                  command=lambda: _aplicar_columnas()).pack(side="left", padx=8, ipadx=6, ipady=2)
+        lbl_pts = tk.Label(f_cols, text="0 filas", bg="#D6EAF8", font=("Arial",8), fg="#1A5276")
+        lbl_pts.pack(side="right", padx=12)
+
+        f_ctrl = tk.Frame(top, bg="#EAF2F8", pady=6); f_ctrl.pack(fill="x")
+        tk.Button(f_ctrl, text="Cargar CSV", bg="#1A5276", fg="white", font=("Arial",8,"bold"),
+                  command=lambda: _cargar_csv()).pack(side="left", padx=10, pady=4, ipadx=8, ipady=3)
+        tk.Button(f_ctrl, text="Exportar CSV", bg="#2980B9", fg="white", font=("Arial",8),
+                  command=lambda: _exportar_csv()).pack(side="left", padx=4, pady=4, ipadx=6, ipady=3)
+        tk.Button(f_ctrl, text="+ Agregar fila", bg="#16A085", fg="white", font=("Arial",8),
+                  command=lambda: _add_row()).pack(side="left", padx=4, pady=4, ipadx=6, ipady=3)
+        tk.Button(f_ctrl, text="Ordenar", bg="#7F8C8D", fg="white", font=("Arial",8),
+                  command=lambda: _ordenar()).pack(side="left", padx=4, pady=4, ipadx=6, ipady=3)
+        tk.Button(f_ctrl, text="Limpiar todo", bg="#C0392B", fg="white", font=("Arial",8),
+                  command=lambda: _limpiar()).pack(side="left", padx=4, pady=4, ipadx=6, ipady=3)
+        tk.Label(f_ctrl, text="CSV: sondaje_mm, v_asiento0, v_asiento1, ...  (1ra fila = encabezado con asientos)",
+                 bg="#EAF2F8", font=("Arial",7), fg="#1A5276").pack(side="right", padx=8)
+
+        f_tbl = tk.Frame(top, bg="white"); f_tbl.pack(fill="both", expand=True, padx=10, pady=6)
+        canvas_t = tk.Canvas(f_tbl, bg="white", highlightthickness=0)
+        sb_t = ttk.Scrollbar(f_tbl, orient="vertical", command=canvas_t.yview)
+        scroll_inner = tk.Frame(canvas_t, bg="white")
+        scroll_inner.bind("<Configure>", lambda e: canvas_t.configure(scrollregion=canvas_t.bbox("all")))
+        win_id = canvas_t.create_window((0,0), window=scroll_inner, anchor="nw")
+        canvas_t.bind("<Configure>", lambda e: canvas_t.itemconfig(win_id, width=e.width))
+        canvas_t.configure(yscrollcommand=sb_t.set)
+        sb_t.pack(side="right", fill="y"); canvas_t.pack(fill="both", expand=True)
+        canvas_t.bind("<MouseWheel>", lambda e: canvas_t.yview_scroll(int(-1*(e.delta/120)) if e.delta else (1 if e.num==5 else -1), "units"))
+        canvas_t.bind("<Button-4>", lambda e: canvas_t.yview_scroll(-1,"units"))
+        canvas_t.bind("<Button-5>", lambda e: canvas_t.yview_scroll(1,"units"))
+
+        state = {"trims": [0.0, 0.5, 1.0, 1.5]}
+        rows_data = []   # cada fila: {"sond": StringVar, "vols": [StringVar, ...]}
+
+        def _parse_trims():
+            raw = var_trims.get().replace(";", ",")
+            out = []
+            for tok in raw.split(","):
+                tok = tok.strip().replace(",", ".")
+                if not tok: continue
+                try: out.append(float(tok))
+                except: pass
+            return out or [0.0]
+
+        def _update_count():
+            n = len([r for r in rows_data if r["sond"].get().strip()])
+            lbl_pts.config(text=f"{n} filas × {len(state['trims'])} asientos")
+
+        def _render_rows():
+            for w in scroll_inner.winfo_children(): w.destroy()
+            hdr = tk.Frame(scroll_inner, bg="#1A5276"); hdr.pack(fill="x")
+            tk.Label(hdr, text="#", width=4, bg="#1A5276", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2, pady=3)
+            tk.Label(hdr, text="SONDAJE (mm)", width=14, bg="#1A5276", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
+            for tval in state["trims"]:
+                tk.Label(hdr, text=f"{label_col2} @ {tval:g}m", width=13, bg="#21618C",
+                         fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
+            tk.Label(hdr, text="Quitar", width=6, bg="#1A5276", fg="white", font=("Arial",8,"bold")).pack(side="left", padx=2)
+            for i, rd in enumerate(rows_data):
+                rf = tk.Frame(scroll_inner, bg="#EBF5FB" if i%2==0 else "white"); rf.pack(fill="x")
+                tk.Label(rf, text=str(i+1), width=4, bg=rf["bg"], font=("Arial",7)).pack(side="left", padx=2, pady=2)
+                tk.Entry(rf, textvariable=rd["sond"], width=14, justify="center", font=("Arial",9),
+                         bg="#FDFEFE").pack(side="left", padx=2)
+                for vv in rd["vols"]:
+                    tk.Entry(rf, textvariable=vv, width=13, justify="center", font=("Arial",9),
+                             bg="#F4FAFF").pack(side="left", padx=2)
+                tk.Button(rf, text="X", bg="#E74C3C", fg="white", width=4, font=("Arial",7),
+                          command=lambda idx=i: _del_row(idx)).pack(side="left", padx=2)
+            _update_count()
+
+        def _add_row(s_val="", v_vals=None):
+            v_vals = v_vals or []
+            vols = [tk.StringVar(value=str(v_vals[c]) if c < len(v_vals) else "")
+                    for c in range(len(state["trims"]))]
+            rows_data.append({"sond": tk.StringVar(value=str(s_val)), "vols": vols})
+            _render_rows()
+
+        def _del_row(idx):
+            if 0 <= idx < len(rows_data): del rows_data[idx]
+            _render_rows()
+
+        def _limpiar():
+            rows_data.clear(); _render_rows()
+
+        def _aplicar_columnas():
+            new_trims = _parse_trims()
+            old_n = len(state["trims"])
+            state["trims"] = new_trims
+            for rd in rows_data:
+                cur = rd["vols"]
+                if len(new_trims) > len(cur):
+                    cur.extend(tk.StringVar(value="") for _ in range(len(new_trims) - len(cur)))
+                elif len(new_trims) < len(cur):
+                    del cur[len(new_trims):]
+            var_trims.set(", ".join(f"{t:g}" for t in new_trims))
+            _render_rows()
+
+        def _ordenar():
+            def _key(rd):
+                try: return float(rd["sond"].get().strip().replace(",","."))
+                except: return float("inf")
+            rows_data.sort(key=_key)
+            _render_rows()
+
+        def _cargar_csv():
+            f_path = filedialog.askopenfilename(
+                title="Cargar tabla de calibrado × asiento",
+                filetypes=[("CSV/TXT","*.csv *.txt"),("Todos","*.*")], parent=top)
+            if not f_path: return
+            try:
+                raw_rows = []
+                with open(f_path, "r", encoding="utf-8-sig") as fcsv:
+                    for line in fcsv:
+                        line = line.strip()
+                        if not line or line.startswith("#"): continue
+                        for sep in [",",";","\t"]:
+                            if sep in line: parts = [p.strip() for p in line.split(sep)]; break
+                        else: parts = line.split()
+                        raw_rows.append(parts)
+                if not raw_rows:
+                    messagebox.showwarning("Sin datos", "Archivo vacío.", parent=top); return
+                # ¿Primera fila es encabezado de asientos? (col0 no numérica)
+                hdr_trims = None
+                try: float(raw_rows[0][0].replace(",","."))
+                except:
+                    hdr_trims = []
+                    for c in raw_rows[0][1:]:
+                        cc = "".join(ch for ch in c.replace(",",".") if (ch.isdigit() or ch in ".-"))
+                        try: hdr_trims.append(float(cc))
+                        except: pass
+                    raw_rows = raw_rows[1:]
+                if hdr_trims:
+                    state["trims"] = hdr_trims
+                    var_trims.set(", ".join(f"{t:g}" for t in hdr_trims))
+                rows_data.clear()
+                for parts in raw_rows:
+                    try:
+                        s_v = parts[0].strip().replace(",",".")
+                        float(s_v)
+                    except: continue
+                    v_vals = [p.strip().replace(",",".") for p in parts[1:]]
+                    _add_row(s_v, v_vals)
+                if not rows_data: _add_row()
+                _render_rows()
+                messagebox.showinfo("OK", f"Cargadas {len(raw_rows)} filas, {len(state['trims'])} asientos.", parent=top)
+            except Exception as ex:
+                messagebox.showerror("Error", f"No se pudo leer:\n{ex}", parent=top)
+
+        def _exportar_csv():
+            filas = []
+            for rd in rows_data:
+                s = rd["sond"].get().strip()
+                if not s: continue
+                filas.append([s] + [vv.get().strip() for vv in rd["vols"]])
+            if not filas:
+                messagebox.showwarning("Sin datos", "No hay filas para exportar.", parent=top); return
+            f_path = filedialog.asksaveasfilename(
+                title="Exportar calibrado × asiento", defaultextension=".csv",
+                filetypes=[("CSV","*.csv"),("Texto","*.txt")],
+                initialfile=f"calibrado_trim_{tk_name}_{etapa}.csv", parent=top)
+            if not f_path: return
+            try:
+                with open(f_path, "w", newline="", encoding="utf-8") as fc:
+                    writer = csv_mod.writer(fc)
+                    writer.writerow(["sondaje_mm"] + [f"{t:g}" for t in state["trims"]])
+                    for row in filas: writer.writerow(row)
+                messagebox.showinfo("Exportado", f"Exportadas {len(filas)} filas.\n{f_path}", parent=top)
+            except Exception as ex:
+                messagebox.showerror("Error", f"No se pudo exportar:\n{ex}", parent=top)
+
+        # Cargar datos existentes
+        existing = self.get_var(var_key).get()
+        if existing:
+            try:
+                obj = json.loads(existing)
+                state["trims"] = [float(t) for t in obj.get("trims", [0.0])] or [0.0]
+                var_trims.set(", ".join(f"{t:g}" for t in state["trims"]))
+                for r in obj.get("rows", []):
+                    if not r: continue
+                    _add_row(r[0], r[1:])
+            except: pass
+        if not rows_data:
+            for _ in range(8): _add_row()
+        _render_rows()
+
+        f_foot = tk.Frame(top, bg="#154360", height=50); f_foot.pack(fill="x", side="bottom")
+        f_foot.pack_propagate(False)
+
+        def _guardar():
+            trims = _parse_trims()
+            state["trims"] = trims
+            rows = []
+            for rd in rows_data:
+                s = rd["sond"].get().strip().replace(",",".")
+                if not s: continue
+                try: s_f = float(s)
+                except: continue
+                vols = []
+                any_v = False
+                for c in range(len(trims)):
+                    raw = rd["vols"][c].get().strip().replace(",",".") if c < len(rd["vols"]) else ""
+                    if raw:
+                        try: vols.append(float(raw)); any_v = True
+                        except: vols.append(None)
+                    else:
+                        vols.append(None)
+                if any_v: rows.append([s_f] + vols)
+            if not rows:
+                self.get_var(var_key).set(""); top.destroy()
+                self.calc_volumen_prod_ui(etapa, tk_name); return
+            rows.sort(key=lambda r: r[0])
+            self.get_var(var_key).set(json.dumps({"trims": trims, "rows": rows}))
+            top.destroy()
+            self.calc_volumen_prod_ui(etapa, tk_name)
+            messagebox.showinfo("Guardado",
+                f"Tabla × asiento guardada: {len(rows)} sondajes × {len(trims)} asientos.\n"
+                f"Asientos: {', '.join(f'{t:g}' for t in trims)} m\n"
+                f"Rango sondaje: {rows[0][0]:.0f} → {rows[-1][0]:.0f} mm")
+
+        tk.Button(f_foot, text="  [OK] GUARDAR TABLA  ", bg="#27AE60", fg="white",
+                  font=("Arial",9,"bold"), relief="flat", cursor="hand2",
+                  command=_guardar).pack(side="left", padx=16, pady=8, ipadx=12, ipady=4)
+        tk.Button(f_foot, text="Cancelar", bg="#7F8C8D", fg="white", font=("Arial",8), relief="flat",
+                  command=top.destroy).pack(side="right", padx=8, pady=8, ipadx=6, ipady=3)
+        tk.Label(f_foot, text="El volumen se interpola por sondaje y por asiento (Popa−Proa) real",
+                 bg="#154360", fg="#AED6F1", font=("Arial",7)).pack(side="right", padx=12)
 
 
 
@@ -8032,6 +8317,11 @@ class PlanillaFinalApp:
                           font=fb, relief="flat", cursor="hand2",
                           command=lambda: self.abrir_tabla_calibrado(etapa, tk_name, es_buque=_mar)
                           ).pack(side="left", padx=8, pady=8, ipadx=8, ipady=4)
+            if _mar:
+                tk.Button(f_bot_fixed, text="  Calibrado × Trim  ", bg="#1A5276", fg="white",
+                          font=fb, relief="flat", cursor="hand2",
+                          command=lambda: self.abrir_tabla_calibrado_trim(etapa, tk_name)
+                          ).pack(side="left", padx=8, pady=8, ipadx=8, ipady=4)
             tk.Label(f_bot_fixed, text=f"{tk_name}  |  {etapa.upper()}",
                      bg="#2C3E50", fg="#AED6F1", font=("Arial",9)).pack(side="right", padx=12)
 
@@ -8159,8 +8449,21 @@ class PlanillaFinalApp:
         import json
         try:
             s = self.parse_float(self.get_var(f"{etapa}_{tanque}_s_corr").get())
+            # ── Tabla de calibrado × asiento (buque/barcaza) — prioridad ────
+            trim_json = self.get_var(f"{etapa}_{tanque}_tabla_trim_json").get()
+            handled_trim = False
+            if trim_json:
+                obj = json.loads(trim_json)
+                trim_m = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+                vol_t, det_t = self._interp_trim_table(obj, s, trim_m)
+                if vol_t is not None:
+                    self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{vol_t:.0f}")
+                    self.get_var(f"{etapa}_{tanque}_prod_s1").set(
+                        f"[trim {len(obj.get('trims', []))}col]")
+                    val = vol_t
+                    handled_trim = True
             # ── Tabla de calibrado multi-punto (si existe) ──────────────────
-            tabla_json = self.get_var(f"{etapa}_{tanque}_tabla_cal_json").get()
+            tabla_json = "" if handled_trim else self.get_var(f"{etapa}_{tanque}_tabla_cal_json").get()
             if tabla_json:
                 pts = json.loads(tabla_json)
                 if len(pts) >= 2:
@@ -8189,7 +8492,7 @@ class PlanillaFinalApp:
                     except: pass
                     self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{val:.0f}")
                     self.get_var(f"{etapa}_{tanque}_prod_s1").set(f"[{len(pts)}pts]")
-            else:
+            elif not handled_trim:
                 # ── Interpolación 2 puntos (modo original) ──────────────────
                 s1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_prod_s1").get())
                 l1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_prod_l1").get())
