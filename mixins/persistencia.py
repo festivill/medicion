@@ -84,8 +84,12 @@ class PersistenciaMixin:
         data["_tank_list"] = self.lista_tanques
         data["_carb_list"] = self.lista_carbonera
         data["_funcionarios"] = [{"cuil": f["cuil"].get(), "legajo": f["legajo"].get(), "apellido": f["apellido"].get(), "nombre": f["nombre"].get(), "funcion": f["funcion"].get()} for f in self.funcionarios_data]
-        # Anclado al directorio de la app (no al CWD desde donde se lanzó)
-        with open(_app_dir() / "autosave.json", 'w') as f: json.dump(data, f)
+        # No pisar el autosave con una sesión en blanco: si todavía no hay datos
+        # reales cargados (app recién abierta, antes de recuperar o cargar un .meg),
+        # se conserva el autosave previo para poder recuperarlo (_recuperar_autosave).
+        # Anclado al directorio de la app (no al CWD desde donde se lanzó).
+        if self._data_tiene_contenido(data):
+            with open(_app_dir() / "autosave.json", 'w') as f: json.dump(data, f)
         self.root.after(30000, self.auto_save_loop)
 
     def _caratulas_dir(self):
@@ -236,51 +240,101 @@ class PersistenciaMixin:
         try:
             with open(f, 'r') as file:
                 data = json.load(file)
-            # Limpiar vars antiguas
-            for key in list(self.vars.keys()): self.vars[key].set("")
-            self.vars.clear()
-            for k,v in data.items():
-                if k.startswith("_"): continue
-                if "tkinter" in k or "<module" in k: continue
-                self.get_var(k).set(v)
-            if "_tipo_medio" in data:
-                tm = data["_tipo_medio"]
-                self.get_var("car_tipo_medio").set(tm)
-                self.get_var("car_tipo_nave").set(tm)
-                # LOCK: guardar tipo original para impedir cambio de categoría
-                self._archivo_tipo_medio = tm
-                self._archivo_bloqueado  = True
-            # Tank lists
-            if "_tank_list" in data:  self.lista_tanques  = data["_tank_list"]
-            if "_carb_list"  in data: self.lista_carbonera = data["_carb_list"]
-            # Rebuild UI PRIMERO - construir_caratula crea func_stack y ddt_stack frescos
-            # Rebuild UI
-            for w in self.tab_caratula.winfo_children(): w.destroy()
-            self.combos_ddt = []
-            self.construir_caratula()
-            self.rebuild_all_tabs()
-            self._apply_tipo_lock()  # apply lock after rebuild
-            # Funcionarios - DESPUES de construir_caratula (func_stack ya existe)
-            # Funcionarios
-            if "_funcionarios" in data:
-                self.funcionarios_data = []
-                self.func_counter = 0
-                for fc in data["_funcionarios"]:
-                    self.agregar_funcionario_row(data=fc)
-            # DDT - DESPUES de construir_caratula (ddt_stack ya existe)
-            # DDT data
-            for d in self.ddt_data[:]: d["main_frame"].destroy()
-            self.ddt_data = []
-            self.ddt_counter = 0
-            if "_ddt_struct" in data:
-                for ddt_d in data["_ddt_struct"]:
-                    self.agregar_ddt_row(data=ddt_d)
-            elif "_ddt_list" in data:  # compatibilidad con archivos viejos
-                for ddt_d in data["_ddt_list"]:
-                    self.agregar_ddt_row(data=ddt_d)
-            elif not self.ddt_data:
-                self.agregar_ddt_row(def_prod="GASOIL")
+            self._aplicar_datos(data)
         except Exception as e:
             traceback.print_exc()
             messagebox.showerror("Error", f"No se pudo cargar el archivo:\n{e}")
+
+    def _data_tiene_contenido(self, data):
+        """True si `data` (dict de un autosave/.meg) tiene datos reales de una
+        medición y no solo los valores por defecto de una app recién abierta.
+        Se usa para (a) NO pisar el autosave con una sesión en blanco y (b) decidir
+        si ofrecer recuperación al iniciar."""
+        for k in ("car_buque", "car_patente", "car_imo"):
+            if str(data.get(k, "")).strip():
+                return True
+        for d in data.get("_ddt_struct", []):
+            if isinstance(d, dict) and str(d.get("numero", "")).strip():
+                return True
+        SUFIJOS = ("_s_corr", "_alt_uti", "_s_tierra", "_agua_lectura",
+                   "_vol_nat_prod", "_vol_bruto", "_vol_liq",
+                   "_tabla_trim_json", "_tabla_cal_json", "_tabla_trim_agua_json")
+        for k, v in data.items():
+            if isinstance(v, str) and v.strip() and any(k.endswith(s) for s in SUFIJOS):
+                return True
+        return False
+
+    def _recuperar_autosave(self):
+        """Al iniciar, restaura automáticamente la última sesión de autosave.json
+        (si tiene datos) para continuar donde se dejó. auto_save_loop nunca sobrescribe
+        el autosave con una sesión en blanco, así que este archivo conserva la última
+        medición con datos reales. Para empezar de cero: menú Archivo → Nueva Medición.
+        Los tests pueden saltear la restauración con MEDICION_SKIP_AUTOLOAD=1."""
+        if os.environ.get("MEDICION_SKIP_AUTOLOAD"):
+            return
+        try:
+            path = _app_dir() / "autosave.json"
+            if not path.exists(): return
+            with open(path, "r") as f:
+                data = json.load(f)
+        except Exception:
+            return
+        if not self._data_tiene_contenido(data): return
+        try:
+            self._aplicar_datos(data)
+            nave = str(data.get("car_buque") or data.get("car_patente") or "").strip()
+            detalle = f" — {nave}" if nave else ""
+            try:
+                self.status_bar.config(
+                    text=f"Sesión recuperada automáticamente{detalle}."
+                         "  (Archivo → Nueva Medición para empezar de cero)")
+            except Exception:
+                pass
+        except Exception:
+            traceback.print_exc()
+
+    def _aplicar_datos(self, data):
+        """Carga un dict de medición (de .meg o del autosave) en la app y
+        reconstruye la UI. Compartido por cargar_datos y _recuperar_autosave."""
+        # Limpiar vars antiguas
+        for key in list(self.vars.keys()): self.vars[key].set("")
+        self.vars.clear()
+        for k,v in data.items():
+            if k.startswith("_"): continue
+            if "tkinter" in k or "<module" in k: continue
+            self.get_var(k).set(v)
+        if "_tipo_medio" in data:
+            tm = data["_tipo_medio"]
+            self.get_var("car_tipo_medio").set(tm)
+            self.get_var("car_tipo_nave").set(tm)
+            # LOCK: guardar tipo original para impedir cambio de categoría
+            self._archivo_tipo_medio = tm
+            self._archivo_bloqueado  = True
+        # Tank lists
+        if "_tank_list" in data:  self.lista_tanques  = data["_tank_list"]
+        if "_carb_list"  in data: self.lista_carbonera = data["_carb_list"]
+        # Rebuild UI PRIMERO - construir_caratula crea func_stack y ddt_stack frescos
+        for w in self.tab_caratula.winfo_children(): w.destroy()
+        self.combos_ddt = []
+        self.construir_caratula()
+        self.rebuild_all_tabs()
+        self._apply_tipo_lock()  # apply lock after rebuild
+        # Funcionarios - DESPUES de construir_caratula (func_stack ya existe)
+        if "_funcionarios" in data:
+            self.funcionarios_data = []
+            self.func_counter = 0
+            for fc in data["_funcionarios"]:
+                self.agregar_funcionario_row(data=fc)
+        # DDT - DESPUES de construir_caratula (ddt_stack ya existe)
+        for d in self.ddt_data[:]: d["main_frame"].destroy()
+        self.ddt_data = []
+        self.ddt_counter = 0
+        if "_ddt_struct" in data:
+            for ddt_d in data["_ddt_struct"]:
+                self.agregar_ddt_row(data=ddt_d)
+        elif "_ddt_list" in data:  # compatibilidad con archivos viejos
+            for ddt_d in data["_ddt_list"]:
+                self.agregar_ddt_row(data=ddt_d)
+        elif not self.ddt_data:
+            self.agregar_ddt_row(def_prod="GASOIL")
 

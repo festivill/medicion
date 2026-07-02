@@ -123,6 +123,7 @@ class PlanillaFinalApp(HelpersMixin, CalculosMixin, CaratulaUIMixin, TanquesUIMi
         self.status_bar = tk.Label(root, text="V120: Norma VCF seleccionable — 1980 (tablas impresas) | 2004 (API MPMS 11.1)", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self._update_norma_status()
+        self._recuperar_autosave()   # ofrecer recuperar sesión previa (si hay)
         self.auto_save_loop()
         
         # --- RESPONSIVE FONTS ---

@@ -2,6 +2,10 @@
 # los tests no abren ventanas (root.withdraw) ni diálogos (se stubbean).
 import os, sys, json, tempfile
 
+# La app auto-restaura autosave.json al iniciar; en tests trabajamos sobre el
+# APP_DIR real, así que lo desactivamos para partir siempre de una app en blanco.
+os.environ.setdefault("MEDICION_SKIP_AUTOLOAD", "1")
+
 APP_DIR = os.environ.get("MEDICION_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
