@@ -7445,8 +7445,9 @@ class PlanillaFinalApp:
         tk.Label(fh, text=f"Sondaje: {s_act:.0f} mm   Asiento: {trim_act:+.2f} m",
                  bg="#1A5276", fg="#AED6F1", font=("Arial",9,"bold")).pack(side="right", padx=12)
 
-        tk.Label(top, text="Cargá los 2 sondajes de la tabla que rodean tu medición, y los litros "
-                           "de cada uno en las 2 páginas de asiento que rodean el asiento real del buque.",
+        tk.Label(top, text="Cargá el sondaje de la tabla y sus litros en los 2 asientos que rodean el asiento real "
+                           "del buque. La 2da fila es opcional: usala solo si tu sondaje medido cae entre dos "
+                           "filas de la tabla (interpola también por sondaje).",
                  bg="#EBF5FB", fg="#1A5276", font=("Arial",8), anchor="w", wraplength=610,
                  justify="left").pack(fill="x", padx=0, pady=(0,4), ipadx=10, ipady=4)
 
