@@ -2175,12 +2175,11 @@ class PdfReportsMixin:
         if self.es_electrico():
             self._pdf_draw_electric(c, x, y, width, height, etapa_key, title)
             return
+        _estilo_tq = "caja"
         if "GASERO" in tm or ("GLP" in tm and "CAMION" not in tm):
-            self._pdf_draw_gasero_ship(c, x, y, width, height, etapa_key, title)
-            return
-        if "METANERO" in tm or "GNL" in tm:
-            self._pdf_draw_metanero_ship(c, x, y, width, height, etapa_key, title)
-            return
+            _estilo_tq = "esfera"
+        elif "METANERO" in tm or "GNL" in tm:
+            _estilo_tq = "gnl"
         # ═══════════════════════════════════════════════════════════════════
         #  BUQUE / BARCAZA — perfil lateral estilo plano naval
         #  Casco esbelto y proporcionado, mar de fondo con flotación según
@@ -2234,6 +2233,12 @@ class PdfReportsMixin:
         c.drawPath(p_sea, fill=1, stroke=0)
         c.setFillColor(MAR2)
         c.rect(px0, y + 8, px1 - px0, (min(sea_top_st, sea_top_bw) - y - 8) * 0.45, fill=1, stroke=0)
+        c.saveState()
+        c.setStrokeColor(colors.white); c.setFillAlpha(1); c.setStrokeAlpha(0.35); c.setLineWidth(0.7)
+        for _vi in range(3):
+            _vy = y + 10 + _vi * 4.5
+            c.line(px0 + 20 + _vi * 40, _vy, px1 - 60 - _vi * 30, _vy)
+        c.restoreState()
 
         # ── Bulbo de proa (detrás del casco, integrado a la roda) ─────────
         if not es_barcaza:
@@ -2303,6 +2308,21 @@ class PdfReportsMixin:
             p_tim.close()
             c.drawPath(p_tim, fill=1, stroke=1)
 
+        # brillo sutil en la obra muerta (sensación de volumen)
+        c.saveState()
+        c.clipPath(p_hull, stroke=0, fill=0)
+        c.setStrokeColor(colors.HexColor("#43596E")); c.setLineWidth(1.1)
+        c.line(stern_tip, deck_y - 2.2, bow_tip, deck_y - 2.2 + (0 if es_barcaza else 3))
+        c.restoreState()
+        # ancla y escobén en la amura
+        if not es_barcaza:
+            _ay = (deck_y + max(wl_bw, wl_st)) / 2 + 6
+            c.setFillColor(colors.HexColor("#0B1218"))
+            c.circle(bow_x + 9, _ay, 1.9, fill=1, stroke=0)
+            c.setStrokeColor(colors.HexColor("#0B1218")); c.setLineWidth(0.9)
+            c.line(bow_x + 9, _ay - 1.5, bow_x + 7.5, _ay - 6)
+            c.line(bow_x + 5.6, _ay - 4.6, bow_x + 9.4, _ay - 4.6)
+
         # ── Compartimentos (tanques) dentro del casco ─────────────────────
         target_side = "BABOR" if "BABOR" in title else "ESTRIBOR"
         tanks_to_draw = [t for t in self.lista_tanques
@@ -2365,13 +2385,84 @@ class PdfReportsMixin:
                 _maxc = max(6, int(cw / 2.4))   # truncar al ancho del tanque
                 c.drawCentredString(cx0 + cw / 2, chip_y + 2.2, l2[:_maxc])
 
+        def _dibujar_gas_tank(cx0, cw, nombre, corto):
+            """Tanque de gasero (esfera) o metanero (domo GNL) sobre cubierta."""
+            pct, _w = self._get_fill_pct(nombre, etapa)
+            vol_liq = self.parse_float(self.get_var(f"{etapa}_{nombre}_vol_liq").get() or "0")
+            _ilustrativo = False
+            if pct <= 0 and vol_liq > 0:
+                pct = 0.62; _ilustrativo = True
+            cxm = cx0 + cw / 2
+            AMBAR = colors.HexColor("#E67E22")
+            if _estilo_tq == "esfera":
+                r = min(cw / 2 - 2, hull_h * 0.62)
+                cy = deck_y + r * 0.30
+                c.setFillColor(colors.HexColor("#FDFEFE")); c.setStrokeColor(colors.HexColor("#4D5656"))
+                c.setLineWidth(0.9)
+                c.circle(cxm, cy, r, fill=1, stroke=1)
+                if pct > 0.01:
+                    c.saveState()
+                    p_c = c.beginPath(); p_c.circle(cxm, cy, r - 0.6)
+                    c.clipPath(p_c, stroke=0, fill=0)
+                    c.setFillColor(AMBAR)
+                    c.rect(cxm - r, cy - r, 2 * r, 2 * r * pct, fill=1, stroke=0)
+                    c.setStrokeColor(colors.HexColor("#935116")); c.setLineWidth(0.4)
+                    c.line(cxm - r, cy - r + 2 * r * pct, cxm + r, cy - r + 2 * r * pct)
+                    c.restoreState()
+                # ecuador y válvula superior
+                c.setStrokeColor(colors.HexColor("#85929E")); c.setLineWidth(0.4)
+                c.ellipse(cxm - r, cy - r * 0.22, cxm + r, cy + r * 0.22, fill=0, stroke=1)
+                c.setFillColor(colors.HexColor("#5D6D7E"))
+                c.rect(cxm - 1.6, cy + r, 3.2, 3, fill=1, stroke=0)
+            else:
+                # domo GNL: prisma con tapa redondeada que asoma sobre cubierta
+                d_top = deck_y + hull_h * 0.36
+                c.setFillColor(colors.HexColor("#FDFEFE")); c.setStrokeColor(colors.HexColor("#4D5656"))
+                c.setLineWidth(0.9)
+                c.roundRect(cx0 + 1, bot_t, cw - 2, d_top - bot_t, min(9, cw * 0.28), fill=1, stroke=1)
+                if pct > 0.01:
+                    c.saveState()
+                    p_c = c.beginPath()
+                    p_c.roundRect(cx0 + 1.6, bot_t + 0.6, cw - 3.2, d_top - bot_t - 1.2, min(8, cw * 0.26))
+                    c.clipPath(p_c, stroke=0, fill=0)
+                    c.setFillColor(AMBAR)
+                    c.rect(cx0, bot_t, cw, (d_top - bot_t) * pct, fill=1, stroke=0)
+                    c.restoreState()
+            # chip de datos bajo cubierta
+            chip_h = 11
+            chip_y = deck_y - chip_h - 4
+            c.setFillAlpha(0.92)
+            c.setFillColor(colors.white); c.setStrokeColor(colors.HexColor("#95A5A6")); c.setLineWidth(0.4)
+            c.roundRect(cx0 + 2, chip_y, cw - 4, chip_h, 1.5, fill=1, stroke=1)
+            c.setFillAlpha(1)
+            c.setFillColor(AZUL); c.setFont("Helvetica-Bold", 4.6)
+            c.drawCentredString(cxm, chip_y + chip_h - 4.6, corto[:14])
+            c.setFillColor(colors.HexColor("#273746")); c.setFont("Helvetica", 4.2)
+            if vol_liq > 0:
+                _l2g = f"{vol_liq:g} m3" + ("" if _ilustrativo else f" · {pct*100:.0f}%")
+            else:
+                _l2g = f"{pct*100:.0f}%"
+            c.drawCentredString(cxm, chip_y + 2, _l2g[:max(6, int(cw / 2.4))])
+
         n_t = len(tanks_to_draw)
         if n_t and tz1 - tz0 > 30:
-            gap = 2.5
+            gap = 2.5 if _estilo_tq == "caja" else 6
             tw = (tz1 - tz0 - gap * (n_t - 1)) / n_t
             for i, t_name in enumerate(tanks_to_draw):
                 corto = t_name.replace("BABOR", "B").replace("ESTRIBOR", "E").strip()
-                _dibujar_compart(tz0 + i * (tw + gap), tw, t_name, corto)
+                if _estilo_tq == "caja":
+                    _dibujar_compart(tz0 + i * (tw + gap), tw, t_name, corto)
+                else:
+                    _dibujar_gas_tank(tz0 + i * (tw + gap), tw, t_name, corto)
+            # baranda de cubierta sobre la zona de carga (solo cajas)
+            if _estilo_tq == "caja" and not es_barcaza:
+                c.setStrokeColor(colors.HexColor("#808B96")); c.setLineWidth(0.5)
+                c.line(tz0, deck_y + 3.2, tz1, deck_y + 3.2 + sheer * 0.6)
+                _np = int((tz1 - tz0) / 14)
+                for _pi in range(_np + 1):
+                    _pxp = tz0 + _pi * (tz1 - tz0) / max(1, _np)
+                    _pyp = deck_y + (_pxp - tz0) / max(1, (tz1 - tz0)) * sheer * 0.6
+                    c.line(_pxp, _pyp + 0.5, _pxp, _pyp + 3.2)
         if carbs_to_draw:
             for cn in carbs_to_draw[:1]:
                 corto = cn.replace("CARBONERA", "CB").replace("BABOR", "B").replace("ESTRIBOR", "E").strip()
