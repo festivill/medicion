@@ -3154,6 +3154,12 @@ class PlanillaFinalApp:
                                      command=lambda t=tk_name, e=etapa: self.abrir_interp_trim_rapida(e, t))
                 btn_trim.pack(side="left", fill="both", expand=True)
                 table_widgets.append(("btn", btn_trim))
+                if _show_agua_col:
+                    btn_trim_ag = tk.Button(f_btns, text="Ag.", bg="#117864", fg="white",
+                                            font=("Arial", 7, "bold"), cursor="hand2",
+                                            command=lambda t=tk_name, e=etapa: self.abrir_interp_trim_rapida(e, t, agua=True))
+                    btn_trim_ag.pack(side="left", fill="both", expand=True)
+                    table_widgets.append(("btn", btn_trim_ag))
             table_widgets.append(("btn", f_btns))
             table_widgets.append(("btn", btn_edit))
 
@@ -7422,28 +7428,32 @@ class PlanillaFinalApp:
         except Exception as ex:
             return None, f"error: {ex}"
 
-    def abrir_interp_trim_rapida(self, etapa, tk_name):
+    def abrir_interp_trim_rapida(self, etapa, tk_name, agua=False):
         """Carga manual rápida para interpolar por asiento (trim) en buques.
         El usuario lee de la tabla de calibrado impresa los dos sondajes que
         rodean su medición y los litros en las dos páginas de asiento que
         rodean el asiento real (p.ej. 0 y 0.5). Interpola en 2D y guarda en
-        {etapa}_{tanque}_tabla_trim_json (mismo formato que el editor completo)."""
+        {etapa}_{tanque}_tabla_trim[_agua]_json (mismo formato que el editor
+        completo). Con agua=True opera sobre el sondaje de agua de fondo."""
         import json
+        _que = "AGUA" if agua else "PRODUCTO"
+        _hbg = "#117864" if agua else "#1A5276"
         top = tk.Toplevel(self.root)
-        top.title(f"Interpolación × Asiento — {tk_name} ({etapa.upper()})")
+        top.title(f"Interpolación × Asiento ({_que}) — {tk_name} ({etapa.upper()})")
         top.geometry("640x470")
         top.resizable(False, False)
-        var_key = f"{etapa}_{tk_name}_tabla_trim_json"
+        var_key = f"{etapa}_{tk_name}_tabla_trim{'_agua' if agua else ''}_json"
 
-        s_act = self.parse_float(self.get_var(f"{etapa}_{tk_name}_s_corr").get())
+        _s_key = f"{etapa}_{tk_name}_agua_s_real" if agua else f"{etapa}_{tk_name}_s_corr"
+        s_act = self.parse_float(self.get_var(_s_key).get())
         trim_act = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
 
-        fh = tk.Frame(top, bg="#1A5276", height=46)
+        fh = tk.Frame(top, bg=_hbg, height=46)
         fh.pack(fill="x"); fh.pack_propagate(False)
-        tk.Label(fh, text=f"INTERPOLACIÓN × ASIENTO  |  {tk_name}  |  {etapa.upper()}",
-                 bg="#1A5276", fg="white", font=("Arial",10,"bold")).pack(side="left", padx=14, pady=10)
-        tk.Label(fh, text=f"Sondaje: {s_act:.0f} mm   Asiento: {trim_act:+.2f} m",
-                 bg="#1A5276", fg="#AED6F1", font=("Arial",9,"bold")).pack(side="right", padx=12)
+        tk.Label(fh, text=f"INTERPOLACIÓN × ASIENTO ({_que})  |  {tk_name}  |  {etapa.upper()}",
+                 bg=_hbg, fg="white", font=("Arial",10,"bold")).pack(side="left", padx=14, pady=10)
+        tk.Label(fh, text=f"Sondaje{' agua' if agua else ''}: {s_act:.0f} mm   Asiento: {trim_act:+.2f} m",
+                 bg=_hbg, fg="#AED6F1", font=("Arial",9,"bold")).pack(side="right", padx=12)
 
         tk.Label(top, text="Cargá el sondaje de la tabla y sus litros en los 2 asientos que rodean el asiento real "
                            "del buque. La 2da fila es opcional: usala solo si tu sondaje medido cae entre dos "
@@ -7485,8 +7495,9 @@ class PlanillaFinalApp:
         e_tB.grid(row=1, column=2, padx=3, pady=2, ipady=3)
 
         tk.Label(f_g, text="SONDAJE (mm)", bg="#D5DBDB", font=fbh).grid(row=2, column=0, padx=3, pady=(10,3), sticky="ew")
-        tk.Label(f_g, text="LITROS @ A", bg="#D6EAF8", font=fbh).grid(row=2, column=1, padx=3, pady=(10,3), sticky="ew")
-        tk.Label(f_g, text="LITROS @ B", bg="#D6EAF8", font=fbh).grid(row=2, column=2, padx=3, pady=(10,3), sticky="ew")
+        _lit = "LTS.AGUA" if agua else "LITROS"
+        tk.Label(f_g, text=f"{_lit} @ A", bg="#D6EAF8", font=fbh).grid(row=2, column=1, padx=3, pady=(10,3), sticky="ew")
+        tk.Label(f_g, text=f"{_lit} @ B", bg="#D6EAF8", font=fbh).grid(row=2, column=2, padx=3, pady=(10,3), sticky="ew")
 
         entries = []
         for i in range(2):
@@ -7548,28 +7559,30 @@ class PlanillaFinalApp:
                 obj["rows"].sort(key=lambda r: r[0])
                 self.get_var(var_key).set(json.dumps(obj))
             top.destroy()
-            self.calc_volumen_prod_ui(etapa, tk_name)
+            if agua: self.calc_volumen_agua_ui(etapa, tk_name)
+            else: self.calc_volumen_prod_ui(etapa, tk_name)
 
         tk.Button(f_foot, text="  [OK] GUARDAR Y APLICAR  ", bg="#27AE60", fg="white",
                   font=("Arial",9,"bold"), relief="flat", cursor="hand2",
                   command=_guardar).pack(side="left", padx=14, pady=8, ipadx=10, ipady=4)
         tk.Button(f_foot, text="Tabla completa / CSV…", bg="#5D6D7E", fg="white", font=("Arial",8), relief="flat",
-                  command=lambda: (top.destroy(), self.abrir_tabla_calibrado_trim(etapa, tk_name))
+                  command=lambda: (top.destroy(), self.abrir_tabla_calibrado_trim(etapa, tk_name, agua=agua))
                   ).pack(side="left", padx=6, pady=8, ipadx=6, ipady=3)
         tk.Button(f_foot, text="Cancelar", bg="#7F8C8D", fg="white", font=("Arial",8), relief="flat",
                   command=top.destroy).pack(side="right", padx=10, pady=8, ipadx=6, ipady=3)
 
-    def abrir_tabla_calibrado_trim(self, etapa, tk_name, label_col2="LITROS"):
+    def abrir_tabla_calibrado_trim(self, etapa, tk_name, label_col2="LITROS", agua=False):
         """Editor de tabla de calibrado con múltiples columnas de asiento (trim) para
         buques/barcazas. Cada sondaje tiene un volumen por cada asiento (p.ej. 0, 0.5,
         1.0, 1.5 m de diferencia popa-proa). El volumen final se interpola en 2D
-        (sondaje × asiento real). Se guarda en {etapa}_{tanque}_tabla_trim_json."""
+        (sondaje × asiento real). Se guarda en {etapa}_{tanque}_tabla_trim[_agua]_json."""
         import json, csv as csv_mod
+        if agua and label_col2 == "LITROS": label_col2 = "LTS.AGUA"
         top = tk.Toplevel(self.root)
-        top.title(f"Calibrado × Asiento (Trim) — {tk_name} ({etapa.upper()})")
+        top.title(f"Calibrado × Asiento (Trim{', AGUA' if agua else ''}) — {tk_name} ({etapa.upper()})")
         top.geometry("1040x660")
         top.resizable(True, True)
-        var_key = f"{etapa}_{tk_name}_tabla_trim_json"
+        var_key = f"{etapa}_{tk_name}_tabla_trim{'_agua' if agua else ''}_json"
 
         fh = tk.Frame(top, bg="#1A5276", height=50)
         fh.pack(fill="x"); fh.pack_propagate(False)
@@ -7800,13 +7813,14 @@ class PlanillaFinalApp:
                     else:
                         vols.append(None)
                 if any_v: rows.append([s_f] + vols)
+            _recalc = self.calc_volumen_agua_ui if agua else self.calc_volumen_prod_ui
             if not rows:
                 self.get_var(var_key).set(""); top.destroy()
-                self.calc_volumen_prod_ui(etapa, tk_name); return
+                _recalc(etapa, tk_name); return
             rows.sort(key=lambda r: r[0])
             self.get_var(var_key).set(json.dumps({"trims": trims, "rows": rows}))
             top.destroy()
-            self.calc_volumen_prod_ui(etapa, tk_name)
+            _recalc(etapa, tk_name)
             messagebox.showinfo("Guardado",
                 f"Tabla × asiento guardada: {len(rows)} sondajes × {len(trims)} asientos.\n"
                 f"Asientos: {', '.join(f'{t:g}' for t in trims)} m\n"
@@ -8468,6 +8482,11 @@ class PlanillaFinalApp:
                           font=fb, relief="flat", cursor="hand2",
                           command=lambda: self.abrir_interp_trim_rapida(etapa, tk_name)
                           ).pack(side="left", padx=8, pady=8, ipadx=8, ipady=4)
+                if _tm in ("BUQUE", "BARCAZA", "BUQUE QUIMIQUERO", "DRAFT SURVEY"):
+                    tk.Button(f_bot_fixed, text="  Interp Agua  ", bg="#117864", fg="white",
+                              font=fb, relief="flat", cursor="hand2",
+                              command=lambda: self.abrir_interp_trim_rapida(etapa, tk_name, agua=True)
+                              ).pack(side="left", padx=8, pady=8, ipadx=8, ipady=4)
             tk.Label(f_bot_fixed, text=f"{tk_name}  |  {etapa.upper()}",
                      bg="#2C3E50", fg="#AED6F1", font=("Arial",9)).pack(side="right", padx=12)
 
@@ -8604,8 +8623,6 @@ class PlanillaFinalApp:
                 vol_t, det_t = self._interp_trim_table(obj, s, trim_m)
                 if vol_t is not None:
                     self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{vol_t:.0f}")
-                    self.get_var(f"{etapa}_{tanque}_prod_s1").set(
-                        f"[trim {len(obj.get('trims', []))}col]")
                     val = vol_t
                     handled_trim = True
             # ── Tabla de calibrado multi-punto (si existe) ──────────────────
@@ -8637,13 +8654,17 @@ class PlanillaFinalApp:
                             val += trim_corr * trim_m
                     except: pass
                     self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{val:.0f}")
-                    self.get_var(f"{etapa}_{tanque}_prod_s1").set(f"[{len(pts)}pts]")
             elif not handled_trim:
                 # ── Interpolación 2 puntos (modo original) ──────────────────
-                s1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_prod_s1").get())
-                l1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_prod_l1").get())
-                s2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_prod_s2").get())
-                l2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_prod_l2").get())
+                # Ignorar marcadores tipo "[5pts]" que versiones previas
+                # escribían en prod_s1 (parse_float los convertía en número).
+                def _pfm(k):
+                    v = self.get_var(k).get()
+                    return 0.0 if "[" in v else self.parse_float(v)
+                s1 = _pfm(f"{etapa}_{tanque}_prod_s1")
+                l1 = _pfm(f"{etapa}_{tanque}_prod_l1")
+                s2 = _pfm(f"{etapa}_{tanque}_prod_s2")
+                l2 = _pfm(f"{etapa}_{tanque}_prod_l2")
                 if s2 == s1: val = l1
                 else: val = l1 + ((s - s1) / (s2 - s1)) * (l2 - l1)
                 self.get_var(f"{etapa}_{tanque}_vol_nat_prod").set(f"{val:.0f}")
@@ -8676,8 +8697,18 @@ class PlanillaFinalApp:
 
     def calc_volumen_agua_ui(self, etapa, tanque):
         if self.is_loading_data: return
+        import json
         try:
             s = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s_real").get())
+            # ── Tabla × asiento para agua (buque/barcaza) — prioridad ──────
+            trim_json = self.get_var(f"{etapa}_{tanque}_tabla_trim_agua_json").get()
+            if trim_json:
+                obj = json.loads(trim_json)
+                trim_m = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+                vol_t, _det = self._interp_trim_table(obj, s, trim_m)
+                if vol_t is not None:
+                    self.get_var(f"{etapa}_{tanque}_vol_nat_agua").set(f"{vol_t:.0f}")
+                    return
             s1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s1").get())
             l1 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_l1").get())
             s2 = self.parse_float(self.get_var(f"{etapa}_{tanque}_agua_s2").get())
@@ -8698,18 +8729,36 @@ class PlanillaFinalApp:
         except: return 0.0
 
     def get_interpolation_details(self, etapa, tanque):
+        import json
         try:
             s = self.get_var(f"{etapa}_{tanque}_s_corr").get()
+            # Tabla × asiento (trim): detalle real de la interpolación 2D
+            tj = self.get_var(f"{etapa}_{tanque}_tabla_trim_json").get()
+            if tj:
+                trim_m = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+                vol, det = self._interp_trim_table(json.loads(tj), self.parse_float(s), trim_m)
+                if vol is not None: return det
+            # Tabla de calibrado multi-punto
+            cj = self.get_var(f"{etapa}_{tanque}_tabla_cal_json").get()
+            if cj:
+                pts = json.loads(cj)
+                return f"Tabla de calibrado ({len(pts)} pts, {pts[0][0]:.0f}→{pts[-1][0]:.0f} mm), sondaje {s} mm"
             s1 = self.get_var(f"{etapa}_{tanque}_prod_s1").get()
             l1 = self.get_var(f"{etapa}_{tanque}_prod_l1").get()
             s2 = self.get_var(f"{etapa}_{tanque}_prod_s2").get()
             l2 = self.get_var(f"{etapa}_{tanque}_prod_l2").get()
             return f"{l1} + (({s} - {s1}) / ({s2} - {s1})) * ({l2} - {l1})"
         except: return "Error en datos"
-    
+
     def get_water_interp_details(self, etapa, tanque):
+        import json
         try:
             s = self.get_var(f"{etapa}_{tanque}_agua_s_real").get()
+            tj = self.get_var(f"{etapa}_{tanque}_tabla_trim_agua_json").get()
+            if tj:
+                trim_m = self.parse_float(self.get_var(f"{etapa}_Trimación").get() or "0")
+                vol, det = self._interp_trim_table(json.loads(tj), self.parse_float(s), trim_m)
+                if vol is not None: return det
             s1 = self.get_var(f"{etapa}_{tanque}_agua_s1").get()
             l1 = self.get_var(f"{etapa}_{tanque}_agua_l1").get()
             s2 = self.get_var(f"{etapa}_{tanque}_agua_s2").get()
@@ -12200,6 +12249,8 @@ class PlanillaFinalApp:
                         f"  4. VCF ({tbl}): {vcf_str}  |  Vol.15°C: {v15_val:,.0f} Lts",
                         f"  5. Dens.lab: {dens}  |  Temp: {temp}°C  |  Peso en aire: {v15_val:,.0f}×({dens}−0.0011) = {kg_air_val:,.0f} Kg",
                     ]
+                    if self.get_var(f"{etapa}_{tk_name}_tabla_trim_agua_json").get():
+                        lines_m.insert(4, f"     Interp. agua: {self.get_water_interp_details(etapa, tk_name)}")
 
                 # ── Tipo METANERO (GNL) ───────────────────────────────────────
                 elif _es_met_rep:
