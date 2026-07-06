@@ -1,0 +1,43 @@
+# CI: corre la suite de tests headless en Linux y Windows en cada push.
+# Windows corre los MISMOS .py que instala instalar.bat (Python 3.11 embebido),
+# así que este job valida que cada actualización publicada por el auto-updater
+# funcione también en las máquinas Windows.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencias
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - name: Tests (bajo Xvfb, la app es Tkinter)
+        run: xvfb-run -a bash tests/run_all.sh
+        env:
+          PY: python
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # misma versión que el Python embebido de instalar.bat
+      - name: Dependencias
+        run: pip install -r requirements.txt
+      - name: Tests
+        run: bash tests/run_all.sh
+        shell: bash
+        env:
+          PY: python
