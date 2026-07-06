@@ -188,26 +188,40 @@ class PlanillaFinalApp(HelpersMixin, CalculosMixin, CaratulaUIMixin, TanquesUIMi
         self._setup_responsive_fonts()
 
     def setup_icon(self):
+        # Ícono de la ventana (multiplataforma). Debe ir ANTES del AppUserModelID
+        # de Windows: en Linux ctypes.windll no existe y cortaba setup_icon antes
+        # del iconphoto, dejando el ícono genérico (engranaje) del gestor de ventanas.
         try:
-            myappid = 'arca.medicion.v108'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-            raw = ICON_WINDOW_B64.strip()
-            if "," in raw: raw = raw.split(",")[1]
-            icon_data = base64.b64decode(raw)
-            icon_image = tk.PhotoImage(data=icon_data)
-            self.root.iconphoto(True, icon_image)
-            self._icon_image_ref = icon_image  # evitar garbage collection
-        except Exception as _ico_err:
-            try:
+            _icon_ok = False
+            # 1) PNG del disco. Tk 8.6 soporta PNG; el b64 embebido es JPEG y Tk
+            #    (PhotoImage) NO lee JPEG, así que hay que evitar ese camino.
+            _png = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arca-icon.png")
+            if os.path.exists(_png):
+                try:
+                    icon_image = tk.PhotoImage(file=_png)
+                    self.root.iconphoto(True, icon_image)
+                    self._icon_image_ref = icon_image  # evitar garbage collection
+                    _icon_ok = True
+                except Exception:
+                    pass
+            # 2) Fallback: decodificar el ícono embebido con PIL (sí lee JPEG)
+            if not _icon_ok:
                 from PIL import Image, ImageTk
                 import io
-                raw2 = ICON_WINDOW_B64.strip()
-                _img = Image.open(io.BytesIO(base64.b64decode(raw2)))
-                _img = _img.resize((32, 32), Image.LANCZOS)
+                raw = ICON_WINDOW_B64.strip()
+                if "," in raw: raw = raw.split(",")[1]
+                _img = Image.open(io.BytesIO(base64.b64decode(raw))).resize((64, 64), Image.LANCZOS)
                 _photo = ImageTk.PhotoImage(_img)
                 self.root.iconphoto(True, _photo)
                 self._icon_image_ref = _photo
-            except: pass
+        except Exception:
+            pass
+        # AppUserModelID: solo Windows (agrupa la app bajo su ícono en la barra
+        # de tareas). Protegido para no afectar a Linux/Mac.
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('arca.medicion')
+        except Exception:
+            pass
 
     # Actores propios de cada declaración detallada (con su CUIT)
     DDT_ACTOR_KEYS = ("despachante", "cuit_desp", "impexp", "cuit_impexp", "ata", "cuit_ata")

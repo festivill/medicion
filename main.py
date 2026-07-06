@@ -10,7 +10,10 @@ import tkinter as tk
 from app import PlanillaFinalApp
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    # className fija el WM_CLASS de la ventana para que el gestor de ventanas /
+    # dock la asocie al lanzador .desktop (StartupWMClass=Medicion) y muestre el
+    # ícono de ARCA en vez del genérico.
+    root = tk.Tk(className="Medicion")
     app = PlanillaFinalApp(root)
     try:
         from updater import check_for_updates_async
