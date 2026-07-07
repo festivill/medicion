@@ -1247,7 +1247,15 @@ class CaratulaUIMixin:
                 r = found[0]
                 obj["cuil"].set(r["cuil"]); obj["legajo"].set(r["legajo"])
                 obj["apellido"].set(r["apellido"]); obj["nombre"].set(r["nombre"])
-                obj["funcion"].set(r["funcion"] if r["funcion"] in funciones else funciones[0])
+                # Si el agente tiene varias funciones registradas, respetar la que
+                # ya está elegida en la fila (solo completarla si no coincide con
+                # ninguna de las suyas); con una sola función, usarla directo.
+                fns = [x["funcion"] for x in found
+                       if (x["cuil"], x["legajo"]) == (r["cuil"], r["legajo"]) and x["funcion"] in funciones]
+                if fns and obj["funcion"].get() not in fns:
+                    obj["funcion"].set(fns[0])
+                elif not fns:
+                    obj["funcion"].set(r["funcion"] if r["funcion"] in funciones else funciones[0])
 
         def _save_to_db(*args):
             """Al salir del campo LEGAJO, guarda o actualiza en DB si hay datos suficientes."""
@@ -1286,6 +1294,13 @@ class CaratulaUIMixin:
                   ).grid(row=0, column=5, padx=2)
 
         self.funcionarios_data.append(obj)
+
+        # Registrar en la DB al agente que entra con datos (autosave, .meg o
+        # buscador): antes solo se guardaba al pasar por Legajo o cambiar la
+        # función, y quedaban agentes de la carátula sin figurar en la base.
+        # db_guardar_funcionario es idempotente por (cuil, legajo, funcion).
+        if data:
+            _save_to_db()
 
     def buscar_y_agregar_funcionario_db(self):
         """Popup busqueda rapida en DB de funcionarios para agregar a caratula."""

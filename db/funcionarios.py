@@ -58,14 +58,14 @@ def _init_db():
     con.commit()
     return con
 
-def db_buscar_funcionarios(query, campo="apellido"):
-    """Devuelve lista de dicts que coinciden."""
+def db_buscar_funcionarios(query, campo="apellido", limit=50):
+    """Devuelve lista de dicts que coinciden (una fila por función del agente)."""
     try:
         con = _init_db()
         rows = con.execute(
             f"SELECT cuil,legajo,apellido,nombre,funcion,aduana,lugar_operativo FROM funcionarios "
-            f"WHERE {campo} LIKE ? ORDER BY apellido LIMIT 20",
-            (f"%{query}%",)
+            f"WHERE {campo} LIKE ? ORDER BY apellido LIMIT ?",
+            (f"%{query}%", int(limit))
         ).fetchall()
         con.close()
         return [{"cuil":r[0],"legajo":r[1],"apellido":r[2],"nombre":r[3],"funcion":r[4],"aduana":r[5],"lugar_operativo":r[6] or ""} for r in rows]
