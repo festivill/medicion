@@ -22,9 +22,9 @@ plataformas por igual desde este repositorio.
 | 2 | **Python 3.11.9 completo** (~25 MB, python.org) | instalación **silenciosa, por-usuario, sin administrador**, contenida en la subcarpeta `python/` de la app. ⚠️ Se usa el instalador completo porque el Python *embeddable* **no incluye Tkinter** (la interfaz) y la app no abre |
 | 3 | **Tkinter** | verificado con `import tkinter`; si había un `python/` viejo sin Tkinter (instalador anterior), se reemplaza solo |
 | 4 | **pip** | incluido con Python; fallback a `get-pip.py` si faltara |
-| 5 | **Dependencias** (`requirements.txt`) | `reportlab` (PDFs) |
+| 5 | **Dependencias** (`requirements.txt`) | `reportlab` (PDFs), `python-docx` (cargos en Word) |
 | 6 | **Acceso directo** "Sistema de Medición" en el Escritorio | apunta a `pythonw.exe main.py` con el ícono ARCA (`arca-icon.ico`) |
-| 7 | Verificación final | `import tkinter, reportlab` |
+| 7 | Verificación final | `import tkinter, reportlab, docx` |
 
 - Para abrir: acceso directo del Escritorio o `Medicion.bat`.
 - Nota: la instalación por-usuario de Python queda registrada en
@@ -41,10 +41,10 @@ plataformas por igual desde este repositorio.
 | 2 | **Tkinter** | `python3-tk` (Debian/Ubuntu), `python3-tkinter` (Fedora), `tk` (Arch) |
 | 3 | **venv** | `python3-venv` en Debian/Ubuntu |
 | 4 | **Entorno virtual** `.venv/` | dentro de la carpeta de la app |
-| 5 | **Dependencias** (`requirements.txt`) | `reportlab` (PDFs) |
+| 5 | **Dependencias** (`requirements.txt`) | `reportlab` (PDFs), `python-docx` (cargos en Word) |
 | 6 | `run.sh` ejecutable | lanzador: `.venv/bin/python main.py` |
 | 7 | **Lanzadores `.desktop`** | menú de aplicaciones (`~/.local/share/applications/`) y Escritorio, con ícono ARCA (`arca-icon.png`) y `StartupWMClass=Medicion` (para que el dock muestre el ícono correcto) |
-| 8 | Verificación final | `import tkinter, reportlab` |
+| 8 | Verificación final | `import tkinter, reportlab, docx` |
 
 - Para abrir: "Sistema de Medición ARCA" en el menú de aplicaciones, o `./run.sh`.
 
@@ -57,6 +57,7 @@ plataformas por igual desde este repositorio.
 | Python | 3.11 (embebido en `python/`) | 3.x del sistema (venv en `.venv/`) | intérprete |
 | Tkinter (Tcl/Tk 8.6) | incluido en el Python completo | paquete del sistema | toda la interfaz |
 | reportlab ≥ 4 | pip | pip | generación de PDFs |
+| python-docx ≥ 1 | pip | pip | informes de cargo/denuncia (.docx) |
 | Pillow | opcional | opcional | solo fallback del ícono |
 | Internet | opcional | opcional | auto-update silencioso al abrir |
 

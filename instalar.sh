@@ -106,8 +106,8 @@ fi
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS_DIR" 2>/dev/null || true
 
 # ----- Verificación final --------------------------------------------------
-.venv/bin/python -c "import tkinter, reportlab" \
-    || fail "La verificación final falló (tkinter/reportlab)."
+.venv/bin/python -c "import tkinter, reportlab, docx" \
+    || fail "La verificación final falló (tkinter/reportlab/docx)."
 
 echo
 echo "============================================================"

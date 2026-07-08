@@ -118,11 +118,11 @@ if errorlevel 1 (
 )
 
 REM ----- Verificacion final -----
-"%PYEXE%" -c "import tkinter, reportlab" >nul 2>&1
+"%PYEXE%" -c "import tkinter, reportlab, docx" >nul 2>&1
 if errorlevel 1 (
     echo  AVISO: la verificacion final fallo. Revise los mensajes anteriores.
 ) else (
-    echo       Verificacion final: Tkinter y reportlab OK.
+    echo       Verificacion final: Tkinter, reportlab y python-docx OK.
 )
 
 echo.

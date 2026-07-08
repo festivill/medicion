@@ -155,6 +155,23 @@ def _apply_update(zip_bytes, app_dir):
             pass
 
 
+def _instalar_dependencias():
+    """Tras aplicar una actualización, instala las dependencias que falten
+    (requirements.txt puede haber sumado librerías nuevas, p.ej. python-docx).
+    Best-effort: si falla, la app avisa al usar la función que la necesite."""
+    try:
+        import subprocess
+        req = os.path.join(_app_dir(), "requirements.txt")
+        if os.path.exists(req):
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--quiet",
+                 "--no-warn-script-location", "-r", req],
+                timeout=300,
+            )
+    except Exception:
+        pass
+
+
 def _ask_and_apply(root, zip_bytes, remote_version, local_version):
     """Se ejecuta en el hilo principal de Tk: pregunta al usuario y aplica."""
     try:
@@ -179,6 +196,7 @@ def _ask_and_apply(root, zip_bytes, remote_version, local_version):
 
     ok, info = _apply_update(zip_bytes, _app_dir())
     if ok:
+        _instalar_dependencias()
         try:
             messagebox.showinfo(
                 "Actualización completa",
