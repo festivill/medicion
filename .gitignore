@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 *.pyo
 *.db
+!aduanas.db
+!funcionarios.db
 *.meg
 autosave.json
 split_source.py
