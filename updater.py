@@ -41,6 +41,12 @@ PRESERVE_NAMES = {
     ".git",
     "__pycache__",
 }
+# Bases distribuidas desde el repo: se reemplazan en cada actualización
+# (pisan cualquier edición local del usuario).
+REPLACE_NAMES = {
+    "aduanas.db",
+    "funcionarios.db",
+}
 
 
 def _app_dir():
@@ -102,6 +108,8 @@ def _download_zip():
 
 def _should_preserve(rel_path):
     name = os.path.basename(rel_path)
+    if name in REPLACE_NAMES:
+        return False
     if name in PRESERVE_NAMES:
         return True
     for part in rel_path.replace("\\", "/").split("/"):
