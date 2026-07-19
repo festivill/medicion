@@ -41,11 +41,19 @@ PRESERVE_NAMES = {
     ".git",
     "__pycache__",
 }
-# Bases distribuidas desde el repo: se reemplazan en cada actualización
-# (pisan cualquier edición local del usuario).
-REPLACE_NAMES = {
-    "aduanas.db",
-    "funcionarios.db",
+# Bases distribuidas desde el repo: en cada actualización se fusionan con la
+# copia local del cliente en vez de reemplazarla. Las filas del repo se
+# insertan/actualizan según su clave natural; las filas que el cliente cargó
+# localmente (claves que no están en el repo) se conservan.
+MERGE_DB_KEYS = {
+    "aduanas.db": {
+        "aduanas": ("codigo",),
+        "lugares_operativos": ("codigo", "aduana_codigo"),
+        "funciones": ("nombre",),
+    },
+    "funcionarios.db": {
+        "funcionarios": ("cuil", "funcion"),
+    },
 }
 
 
@@ -108,8 +116,6 @@ def _download_zip():
 
 def _should_preserve(rel_path):
     name = os.path.basename(rel_path)
-    if name in REPLACE_NAMES:
-        return False
     if name in PRESERVE_NAMES:
         return True
     for part in rel_path.replace("\\", "/").split("/"):
@@ -119,6 +125,76 @@ def _should_preserve(rel_path):
         if name.endswith(pat):
             return True
     return False
+
+
+def _merge_db(src_path, dst_path, table_keys):
+    """Fusiona la base del repo (src) sobre la base local del cliente (dst).
+
+    Por cada tabla con clave natural declarada: inserta las filas del repo que
+    el cliente no tiene y actualiza las columnas no-clave de las que sí tiene
+    (el repo es autoritativo para sus propias filas). Las filas locales cuya
+    clave no existe en el repo quedan intactas. Tablas sin clave declarada se
+    fusionan por coincidencia exacta de todas las columnas (solo inserción)."""
+    import sqlite3
+
+    if not os.path.exists(dst_path):
+        shutil.copy2(src_path, dst_path)
+        return
+
+    src = sqlite3.connect(src_path)
+    dst = sqlite3.connect(dst_path, timeout=10)
+    try:
+        tables = [
+            r[0] for r in src.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name != 'sqlite_sequence'"
+            )
+        ]
+        for table in tables:
+            create_sql = src.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()[0]
+            exists = dst.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
+            if not exists:
+                dst.execute(create_sql)
+
+            cols = [r[1] for r in src.execute(f"PRAGMA table_info('{table}')")]
+            data_cols = [c for c in cols if c != "id"]
+            keys = table_keys.get(table)
+            if keys is None:
+                keys, value_cols = tuple(data_cols), []
+            else:
+                value_cols = [c for c in data_cols if c not in keys]
+
+            col_list = ", ".join(data_cols)
+            placeholders = ", ".join("?" for _ in data_cols)
+            where_key = " AND ".join(f"{k} IS ?" for k in keys)
+
+            for row in src.execute(f"SELECT {col_list} FROM {table}"):
+                vals = dict(zip(data_cols, row))
+                key_vals = [vals[k] for k in keys]
+                found = dst.execute(
+                    f"SELECT 1 FROM {table} WHERE {where_key}", key_vals
+                ).fetchone()
+                if not found:
+                    dst.execute(
+                        f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})",
+                        row,
+                    )
+                elif value_cols:
+                    set_expr = ", ".join(f"{c} = ?" for c in value_cols)
+                    dst.execute(
+                        f"UPDATE {table} SET {set_expr} WHERE {where_key}",
+                        [vals[c] for c in value_cols] + key_vals,
+                    )
+        dst.commit()
+    finally:
+        src.close()
+        dst.close()
 
 
 def _apply_update(zip_bytes, app_dir):
@@ -141,10 +217,16 @@ def _apply_update(zip_bytes, app_dir):
             os.makedirs(target_dir, exist_ok=True)
             for fname in filenames:
                 rel_file = fname if rel_dir == "." else os.path.join(rel_dir, fname)
-                if _should_preserve(rel_file):
-                    continue
                 src_file = os.path.join(dirpath, fname)
                 dst_file = os.path.join(target_dir, fname)
+                if fname in MERGE_DB_KEYS and rel_dir == ".":
+                    try:
+                        _merge_db(src_file, dst_file, MERGE_DB_KEYS[fname])
+                    except Exception:
+                        pass  # base local en uso o corrupta: se reintenta en el próximo update
+                    continue
+                if _should_preserve(rel_file):
+                    continue
                 try:
                     shutil.copy2(src_file, dst_file)
                 except PermissionError:
